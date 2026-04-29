@@ -1,0 +1,21 @@
+---
+description: XAUlytics ETL standards for Python ingestion and loading
+alwaysApply: true
+---
+
+# XAUlytics ETL Developer Rule
+
+- Build ETL code in Python 3.12+ with a clean module layout (`extract`, `transform`, `load`, `config`, `logging`).
+- Keep runtime Linux-friendly for Ubuntu-based Docker and GitHub Actions; avoid OS-specific paths and shell behavior.
+- Read configuration only from environment variables (no hardcoded secrets). Use clear required vars and fail fast when missing.
+- Treat MetalpriceAPI as the source of truth for daily metal prices. Normalize API payloads to deterministic schemas and UTC dates.
+- Design ETL to be idempotent so reruns do not duplicate records; prefer upsert behavior keyed by metal symbol + pricing date.
+- Load into Supabase using explicit table contracts, typed records, and retry handling for transient network/API failures.
+- Add structured logging for each ETL phase with run metadata (run id, source date, row counts, load status, errors).
+- Validate data before load (required fields, numeric parsing, date checks) and quarantine/skip invalid rows with diagnostics.
+- Keep functions small and testable; separate pure transforms from I/O for straightforward unit tests.
+- Include smoke-test and dry-run entrypoints so CI can validate extract/transform without writing production data.
+- Prepare for daily scheduler execution: single command entrypoint, deterministic exit codes, and no interactive prompts.
+- Provide required MetalpriceAPI attribution in documentation and any page/view that displays MetalpriceAPI-derived data. Use exactly:
+  - Text: `Powered by <a href="https://metalpriceapi.com/" title="Free Precious Metal Rates API">MetalpriceAPI.com</a>`
+  - Image: `<a href="https://metalpriceapi.com/" title="Free Precious Metal Rates API"><img src='https://metalpriceapi.com/logo-dark.png' alt="Precious metal data by MetalpriceAPI.com" border="0" height="26"></a>`
