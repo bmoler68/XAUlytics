@@ -8,6 +8,8 @@ alwaysApply: true
 - Build ETL code in Python 3.12+ with a clean module layout (`extract`, `transform`, `load`, `config`, `logging`).
 - Keep runtime Linux-friendly for Ubuntu-based Docker and GitHub Actions; avoid OS-specific paths and shell behavior.
 - Read configuration only from environment variables (no hardcoded secrets). Use clear required vars and fail fast when missing.
+- Store production secrets (for example `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `METALPRICEAPI_KEY`) in GitHub Actions Secrets only.
+- For development runs, load secrets from local environment variables; values may be sourced from Windows Credential Manager and injected into the environment at runtime.
 - Treat MetalpriceAPI as the source of truth for daily metal prices. Normalize API payloads to deterministic schemas and UTC dates.
 - Assume MetalpriceAPI free-plan limits: maximum 100 requests/day. Minimize calls aggressively and only request data required for the daily ETL run.
 - Free plan constraints mean no hourly rates; prioritize end-of-day/closing metal prices for each ETL date.
