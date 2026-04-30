@@ -9,6 +9,10 @@ alwaysApply: true
 - Keep runtime Linux-friendly for Ubuntu-based Docker and GitHub Actions; avoid OS-specific paths and shell behavior.
 - Read configuration only from environment variables (no hardcoded secrets). Use clear required vars and fail fast when missing.
 - Treat MetalpriceAPI as the source of truth for daily metal prices. Normalize API payloads to deterministic schemas and UTC dates.
+- Assume MetalpriceAPI free-plan limits: maximum 100 requests/day. Minimize calls aggressively and only request data required for the daily ETL run.
+- Free plan constraints mean no hourly rates; prioritize end-of-day/closing metal prices for each ETL date.
+- Use `USD` as the required base currency for all extracted and stored price records.
+- Enforce unit conventions in transformations: precious metals use troy ounces, non-precious metals use ounces.
 - Design ETL to be idempotent so reruns do not duplicate records; prefer upsert behavior keyed by metal symbol + pricing date.
 - Load into Supabase using explicit table contracts, typed records, and retry handling for transient network/API failures.
 - Add structured logging for each ETL phase with run metadata (run id, source date, row counts, load status, errors).
