@@ -101,7 +101,11 @@ Historical manual run in container:
 
 ## GitHub Actions
 
-Daily workflow file: `.github/workflows/daily-etl.yml`
+Workflows:
+
+- Daily ETL scheduler: `.github/workflows/daily-etl.yml`
+- Historical ETL (manual only): `.github/workflows/historical-etl.yml`
+- CI tests (manual only): `.github/workflows/ci.yml`
 
 Configure these repository secrets:
 
@@ -109,6 +113,28 @@ Configure these repository secrets:
 - `METALPRICEAPI_BASE_URL` (optional; defaults to US endpoint if omitted locally)
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
+
+### Running CI Manually
+
+1. Open your repository in GitHub.
+2. Go to **Actions**.
+3. Select the **CI** workflow.
+4. Click **Run workflow** and start the run.
+
+The CI workflow runs `pytest` using Python 3.12 and does not auto-run on push or pull request.
+
+### Running Historical ETL Manually
+
+1. Open your repository in GitHub.
+2. Go to **Actions**.
+3. Select **Historical ETL (Manual)**.
+4. Click **Run workflow**.
+5. Provide:
+   - `start_date` in `YYYY-MM-DD`
+   - `end_date` in `YYYY-MM-DD`
+6. Start the run.
+
+The workflow executes `xaulytics-etl historical --start-date <start_date> --end-date <end_date>`.
 
 ## Attribution Requirement
 
@@ -124,7 +150,6 @@ When data is displayed in docs/pages, include:
 - Add request-budget guardrails (for free-plan limit monitoring and abort thresholds).
 - Decide how you want to classify and persist units for non-metal forex symbols (current implementation leaves unclear cases as null).
 - Add retry/backoff policy with explicit jitter and failure classification (currently relies on request exceptions and run-failure logging).
-- Add CI test job (pytest) in GitHub Actions before daily run workflow promotion.
 - Add alerting/notifications for failed scheduled runs (email/Slack/etc.).
 
 ## Notes About Closing Prices
