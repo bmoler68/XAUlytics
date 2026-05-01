@@ -15,6 +15,7 @@ class Settings:
     supabase_schema: str
     supabase_metal_prices_table: str
     supabase_etl_runs_table: str
+    supabase_symbols_table: str
     log_level: str
 
 
@@ -35,5 +36,6 @@ def load_settings() -> Settings:
         supabase_schema=os.getenv("SUPABASE_SCHEMA", "xaulytics"),
         supabase_metal_prices_table=os.getenv("SUPABASE_METAL_PRICES_TABLE", "metal_prices_v1"),
         supabase_etl_runs_table=os.getenv("SUPABASE_ETL_RUNS_TABLE", "etl_runs_v1"),
+        supabase_symbols_table=os.getenv("SUPABASE_SYMBOLS_TABLE", "metalprice_api_symbols_v1"),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
     )

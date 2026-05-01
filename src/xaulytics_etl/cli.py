@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from datetime import date
 
-from xaulytics_etl.etl import run_daily, run_historical
+from xaulytics_etl.etl import run_daily, run_historical, run_sync_symbols_catalog
 
 
 def _parse_iso_date(value: str) -> date:
@@ -18,6 +18,11 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("daily", help="Run daily ETL for latest available rates.")
+
+    subparsers.add_parser(
+        "symbols",
+        help="Sync supported symbol codes from MetalpriceAPI /v1/symbols (does not count toward API quota).",
+    )
 
     historical_parser = subparsers.add_parser(
         "historical",
@@ -45,6 +50,10 @@ def main() -> None:
 
     if args.command == "daily":
         run_daily()
+        return
+
+    if args.command == "symbols":
+        run_sync_symbols_catalog()
         return
 
     if args.command == "historical":

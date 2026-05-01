@@ -13,3 +13,11 @@ class RateRecord:
     unit: str | None
     source_endpoint: str
     source_timestamp: int | None
+
+
+@dataclass(frozen=True)
+class SymbolCatalogRecord:
+    symbol_code: str
+    display_name: str
+    category: str
+    unit: str | None

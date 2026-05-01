@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from supabase import Client, create_client
 
-from xaulytics_etl.models import RateRecord
+from xaulytics_etl.models import RateRecord, SymbolCatalogRecord
 
 
 class SupabaseLoader:
@@ -17,11 +17,13 @@ class SupabaseLoader:
         schema: str,
         metal_prices_table: str,
         etl_runs_table: str,
+        symbols_table: str,
     ) -> None:
         self._client: Client = create_client(supabase_url, supabase_service_role_key)
         self._schema = schema
         self._metal_prices_table = metal_prices_table
         self._etl_runs_table = etl_runs_table
+        self._symbols_table = symbols_table
 
     def create_run_log(self, mode: str, requested_start_date: str | None, requested_end_date: str | None) -> str:
         run_id = str(uuid4())
@@ -46,6 +48,20 @@ class SupabaseLoader:
         ).execute()
         return len(payload)
 
+    def upsert_symbol_catalog(self, records: list[SymbolCatalogRecord], batch_size: int = 200) -> int:
+        if not records:
+            return 0
+        total = 0
+        for offset in range(0, len(records), batch_size):
+            batch = records[offset : offset + batch_size]
+            payload = [self._symbol_record_to_row(record) for record in batch]
+            self._client.schema(self._schema).table(self._symbols_table).upsert(
+                payload,
+                on_conflict="symbol_code",
+            ).execute()
+            total += len(payload)
+        return total
+
     def complete_run_log(self, run_id: str, status: str, row_count: int, error_message: str | None = None) -> None:
         payload: dict[str, Any] = {
             "status": status,
@@ -67,4 +83,15 @@ class SupabaseLoader:
             "source_endpoint": record.source_endpoint,
             "source_timestamp": record.source_timestamp,
             "ingested_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @staticmethod
+    def _symbol_record_to_row(record: SymbolCatalogRecord) -> dict[str, Any]:
+        return {
+            "symbol_code": record.symbol_code,
+            "display_name": record.display_name,
+            "category": record.category,
+            "unit": record.unit,
+            "source": "metalpriceapi.com/v1/symbols",
+            "documented_at": datetime.now(timezone.utc).isoformat(),
         }

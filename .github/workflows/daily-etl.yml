@@ -8,6 +8,16 @@ on:
 jobs:
   run-daily-etl:
     runs-on: ubuntu-latest
+    env:
+      METALPRICEAPI_API_KEY: ${{ secrets.METALPRICEAPI_API_KEY }}
+      METALPRICEAPI_BASE_URL: ${{ secrets.METALPRICEAPI_BASE_URL }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_SCHEMA: xaulytics
+      SUPABASE_METAL_PRICES_TABLE: metal_prices_v1
+      SUPABASE_ETL_RUNS_TABLE: etl_runs_v1
+      SUPABASE_SYMBOLS_TABLE: metalprice_api_symbols_v1
+      LOG_LEVEL: INFO
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,14 +32,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install .
 
+      - name: Sync symbol catalog
+        run: xaulytics-etl symbols
+
       - name: Run daily ETL
-        env:
-          METALPRICEAPI_API_KEY: ${{ secrets.METALPRICEAPI_API_KEY }}
-          METALPRICEAPI_BASE_URL: ${{ secrets.METALPRICEAPI_BASE_URL }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SUPABASE_SCHEMA: xaulytics
-          SUPABASE_METAL_PRICES_TABLE: metal_prices_v1
-          SUPABASE_ETL_RUNS_TABLE: etl_runs_v1
-          LOG_LEVEL: INFO
         run: xaulytics-etl daily

@@ -59,3 +59,31 @@ select
   started_at_utc,
   completed_at_utc
 from xaulytics.etl_runs_v1;
+
+-- ---------------------------------------------------------------------------
+-- MetalpriceAPI supported symbols (reference catalog)
+-- Populated by ETL: xaulytics-etl symbols (GET /v1/symbols; does not count
+-- toward MetalpriceAPI monthly quota per API documentation).
+-- ---------------------------------------------------------------------------
+
+create table if not exists xaulytics.metalprice_api_symbols_v1 (
+  symbol_code text primary key,
+  display_name text not null,
+  category text not null,
+  unit text null,
+  source text not null default 'metalpriceapi.com/v1/symbols',
+  documented_at timestamptz not null default now()
+);
+
+create index if not exists idx_metalprice_api_symbols_v1_category
+  on xaulytics.metalprice_api_symbols_v1 (category);
+
+create or replace view xaulytics.metalprice_api_symbols_current as
+select
+  symbol_code,
+  display_name,
+  category,
+  unit,
+  source,
+  documented_at
+from xaulytics.metalprice_api_symbols_v1;

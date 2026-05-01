@@ -10,20 +10,22 @@ Python ETL application that pulls MetalpriceAPI market rates and loads normalize
   - `load` (`src/xaulytics_etl/load.py`)
   - orchestration (`src/xaulytics_etl/etl.py`)
   - CLI entrypoint (`src/xaulytics_etl/cli.py`)
-- Two runtime modes:
+- Runtime modes:
   - `daily`: pulls most current rates from `/v1/latest`
   - `historical` (manual): supports single date or date range using:
     - `/v1/YYYY-MM-DD` for single date
     - `/v1/timeframe` for date ranges
+  - `symbols`: loads `/v1/symbols` into `metalprice_api_symbols_v1` (documented as not counting toward monthly API quota)
 - Supabase naming/versioning convention applied:
   - schema: `xaulytics`
-  - tables: `metal_prices_v1`, `etl_runs_v1`
-  - SQL setup file: `sql/schema.sql`
+  - tables: `metal_prices_v1`, `etl_runs_v1`, `metalprice_api_symbols_v1` (reference catalog; filled via `xaulytics-etl symbols`)
+  - stable views: `metal_prices_current`, `etl_runs_current`, `metalprice_api_symbols_current`
+  - SQL setup file: `sql/schema.sql` (DDL only for symbols table; run `symbols` command after schema apply)
 - Idempotent load behavior via upsert on `(pricing_date, quote_code)`.
 - Structured JSON logging for ETL phases and run metadata.
 - Dockerfile for Linux container execution.
 - GitHub Actions workflow for daily scheduled runs (`.github/workflows/daily-etl.yml`).
-- Basic transform tests (`tests/test_transform.py`).
+- Unit tests: `tests/test_transform.py`, `tests/test_symbol_catalog.py`
 
 ## API Endpoints Used
 
@@ -32,7 +34,7 @@ Based on your requirements and previous planning:
 - `GET /v1/latest` for daily mode (most current available closing-like delayed data on free plan)
 - `GET /v1/YYYY-MM-DD` for historical single-date mode
 - `GET /v1/timeframe` for manual historical date-range mode
-- `GET /v1/symbols` available in client (for metadata/validation if needed later)
+- `GET /v1/symbols` for symbol catalog sync (`xaulytics-etl symbols`; quota-free per MetalpriceAPI docs)
 
 The ETL currently requests all rates returned by those endpoints (including Indian symbols when provided by API response), without hardcoded allow-lists.
 
@@ -53,12 +55,25 @@ The ETL currently requests all rates returned by those endpoints (including Indi
 ### `xaulytics.etl_runs_v1`
 
 - `run_id` (uuid, PK)
-- `mode` (`daily`, `historical_manual`)
+- `mode` (`daily`, `historical_manual`, `symbols_catalog`)
 - `requested_start_date`, `requested_end_date`
 - `status` (`started`, `success`, `failed`)
 - `row_count`
 - `error_message`
 - `started_at_utc`, `completed_at_utc`
+
+### `xaulytics.metalprice_api_symbols_v1`
+
+Reference rows loaded from MetalpriceAPI `GET /v1/symbols` via `xaulytics-etl symbols`. Use for joins, validation, and labeling. `display_name` comes from the API; `category` and `unit` are best-effort heuristics in `src/xaulytics_etl/symbol_catalog.py` (unknown codes default to `currency` with null unit).
+
+- `symbol_code` (text, PK)
+- `display_name` (text)
+- `category` (text): `precious_metals`, `metals`, `india_gold`, `india_silver`, `cryptocurrency`, `energy`, `currency`
+- `unit` (text, nullable): normalized units such as `troy_ounce`, `ounce`, `per_barrel`, `per_gallon`, `per_mmbtu`
+- `source` (text): `metalpriceapi.com/v1/symbols` on rows written by this ETL
+- `documented_at` (timestamptz)
+
+Downstream queries should prefer `xaulytics.metalprice_api_symbols_current` (stable name) over the versioned table when you introduce `_v2` later.
 
 ## Configuration
 
@@ -71,6 +86,7 @@ Use environment variables (no secrets hardcoded):
 - `SUPABASE_SCHEMA` (default: `xaulytics`)
 - `SUPABASE_METAL_PRICES_TABLE` (default: `metal_prices_v1`)
 - `SUPABASE_ETL_RUNS_TABLE` (default: `etl_runs_v1`)
+- `SUPABASE_SYMBOLS_TABLE` (default: `metalprice_api_symbols_v1`)
 - `LOG_LEVEL` (default: `INFO`)
 
 See `.env.example`.
@@ -83,7 +99,8 @@ See `.env.example`.
    - `pip install -e .[dev]`
 2. Set local environment variables (optionally sourced from Windows Credential Manager).
 3. Run schema SQL in Supabase (`sql/schema.sql`).
-4. Run ETL:
+4. Load symbol catalog once (and after API adds new codes): `xaulytics-etl symbols`
+5. Run ETL:
    - Daily: `xaulytics-etl daily`
    - Historical one day: `xaulytics-etl historical --start-date 2026-04-01`
    - Historical range: `xaulytics-etl historical --start-date 2026-04-01 --end-date 2026-04-10`
@@ -99,12 +116,16 @@ Historical manual run in container:
 
 - `docker run --rm --env-file .env xaulytics-etl:latest historical --start-date 2026-04-01 --end-date 2026-04-05`
 
+Symbol catalog sync in container:
+
+- `docker run --rm --env-file .env xaulytics-etl:latest symbols`
+
 ## GitHub Actions
 
 Workflows:
 
-- Daily ETL scheduler: `.github/workflows/daily-etl.yml`
-- Historical ETL (manual only): `.github/workflows/historical-etl.yml`
+- Daily ETL scheduler: `.github/workflows/daily-etl.yml` (runs `xaulytics-etl symbols` then `xaulytics-etl daily`)
+- Historical ETL (manual only): `.github/workflows/historical-etl.yml` (runs `symbols` then `historical` for the chosen date range)
 - CI tests (manual only): `.github/workflows/ci.yml`
 
 Configure these repository secrets:
@@ -134,7 +155,7 @@ The CI workflow runs `pytest` using Python 3.12 and does not auto-run on push or
    - `end_date` in `YYYY-MM-DD`
 6. Start the run.
 
-The workflow executes `xaulytics-etl historical --start-date <start_date> --end-date <end_date>`.
+The workflow first syncs the symbol catalog (`xaulytics-etl symbols`), then runs `xaulytics-etl historical --start-date <start_date> --end-date <end_date>`.
 
 ## Attribution Requirement
 
@@ -148,7 +169,7 @@ When data is displayed in docs/pages, include:
 - Run SQL migration in your Supabase project and verify permissions for service-role usage.
 - Add integration tests with mocked MetalpriceAPI and Supabase responses.
 - Add request-budget guardrails (for free-plan limit monitoring and abort thresholds).
-- Decide how you want to classify and persist units for non-metal forex symbols (current implementation leaves unclear cases as null).
+- Tighten symbol `category`/`unit` heuristics if MetalpriceAPI adds codes that do not match current patterns (unknown codes default to `currency`).
 - Add retry/backoff policy with explicit jitter and failure classification (currently relies on request exceptions and run-failure logging).
 - Add alerting/notifications for failed scheduled runs (email/Slack/etc.).
 
