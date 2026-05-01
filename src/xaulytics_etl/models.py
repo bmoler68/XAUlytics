@@ -21,3 +21,4 @@ class SymbolCatalogRecord:
     display_name: str
     category: str
     unit: str | None
+    enabled_for_pricing: bool = False

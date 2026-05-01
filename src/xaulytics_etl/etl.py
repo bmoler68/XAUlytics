@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import date
 
 from xaulytics_etl.config import load_settings
@@ -15,6 +16,17 @@ from xaulytics_etl.transform import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _pricing_currencies_csv(loader: SupabaseLoader) -> str:
+    codes = loader.fetch_pricing_enabled_symbol_codes()
+    if not codes:
+        raise ValueError(
+            "No symbols have enabled_for_pricing=true in the symbol catalog table. "
+            "Run `xaulytics-etl symbols`, then set enabled_for_pricing for the codes you want "
+            "MetalpriceAPI to return (free tier requires an explicit currencies list)."
+        )
+    return ",".join(codes)
 
 
 def run_daily() -> int:
@@ -32,7 +44,8 @@ def run_daily() -> int:
 
     run_id = loader.create_run_log(mode="daily", requested_start_date=None, requested_end_date=None)
     try:
-        payload = client.get_latest_rates(base_currency="USD")
+        currencies = _pricing_currencies_csv(loader)
+        payload = client.get_latest_rates(base_currency="USD", currencies=currencies)
         records = normalize_latest_payload(payload)
         inserted_count = loader.upsert_rates(records)
         loader.complete_run_log(run_id, status="success", row_count=inserted_count)
@@ -63,11 +76,17 @@ def run_historical(start_date: date, end_date: date) -> int:
         requested_end_date=end_date.isoformat(),
     )
     try:
+        currencies = _pricing_currencies_csv(loader)
         if start_date == end_date:
-            payload = client.get_historical_date_rates(start_date, base_currency="USD")
+            payload = client.get_historical_date_rates(start_date, base_currency="USD", currencies=currencies)
             records = normalize_historical_payload(payload, endpoint_name="historical")
         else:
-            payload = client.get_timeframe_rates(start_date=start_date, end_date=end_date, base_currency="USD")
+            payload = client.get_timeframe_rates(
+                start_date=start_date,
+                end_date=end_date,
+                base_currency="USD",
+                currencies=currencies,
+            )
             records = normalize_timeframe_payload(payload)
         inserted_count = loader.upsert_rates(records)
         loader.complete_run_log(run_id, status="success", row_count=inserted_count)
@@ -106,7 +125,11 @@ def run_sync_symbols_catalog() -> int:
     run_id = loader.create_run_log(mode="symbols_catalog", requested_start_date=None, requested_end_date=None)
     try:
         symbols_map = client.get_symbols()
-        records = symbols_response_to_records(symbols_map)
+        enabled_codes = set(loader.fetch_pricing_enabled_symbol_codes())
+        records = [
+            replace(record, enabled_for_pricing=(record.symbol_code in enabled_codes))
+            for record in symbols_response_to_records(symbols_map)
+        ]
         row_count = loader.upsert_symbol_catalog(records)
         loader.complete_run_log(run_id, status="success", row_count=row_count)
         LOGGER.info(

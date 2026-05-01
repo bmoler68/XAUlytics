@@ -89,6 +89,7 @@ def symbols_response_to_records(symbols: dict[str, str]) -> list[SymbolCatalogRe
                 display_name=name,
                 category=category,
                 unit=unit,
+                enabled_for_pricing=False,
             )
         )
     records.sort(key=lambda row: row.symbol_code)

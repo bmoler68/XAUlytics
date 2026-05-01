@@ -31,20 +31,37 @@ class MetalpriceApiClient:
         payload = self._get("/v1/symbols", {})
         return payload.get("symbols", {})
 
-    def get_latest_rates(self, base_currency: str = "USD") -> dict[str, Any]:
-        return self._get("/v1/latest", {"base": base_currency})
+    def get_latest_rates(self, base_currency: str = "USD", currencies: str | None = None) -> dict[str, Any]:
+        params: dict[str, Any] = {"base": base_currency}
+        if currencies:
+            params["currencies"] = currencies
+        return self._get("/v1/latest", params)
 
-    def get_historical_date_rates(self, pricing_date: date, base_currency: str = "USD") -> dict[str, Any]:
-        return self._get(f"/v1/{pricing_date.isoformat()}", {"base": base_currency})
+    def get_historical_date_rates(
+        self,
+        pricing_date: date,
+        base_currency: str = "USD",
+        currencies: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"base": base_currency}
+        if currencies:
+            params["currencies"] = currencies
+        return self._get(f"/v1/{pricing_date.isoformat()}", params)
 
-    def get_timeframe_rates(self, start_date: date, end_date: date, base_currency: str = "USD") -> dict[str, Any]:
+    def get_timeframe_rates(
+        self,
+        start_date: date,
+        end_date: date,
+        base_currency: str = "USD",
+        currencies: str | None = None,
+    ) -> dict[str, Any]:
         if end_date < start_date:
             raise ValueError("end_date must be on or after start_date")
-        return self._get(
-            "/v1/timeframe",
-            {
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
-                "base": base_currency,
-            },
-        )
+        params: dict[str, Any] = {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "base": base_currency,
+        }
+        if currencies:
+            params["currencies"] = currencies
+        return self._get("/v1/timeframe", params)

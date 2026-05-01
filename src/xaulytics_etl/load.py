@@ -38,6 +38,19 @@ class SupabaseLoader:
         self._client.schema(self._schema).table(self._etl_runs_table).insert(payload).execute()
         return run_id
 
+    def fetch_pricing_enabled_symbol_codes(self) -> list[str]:
+        response = (
+            self._client.schema(self._schema)
+            .table(self._symbols_table)
+            .select("symbol_code")
+            .eq("enabled_for_pricing", True)
+            .execute()
+        )
+        rows = response.data or []
+        codes = [str(row["symbol_code"]) for row in rows if row.get("symbol_code")]
+        codes.sort()
+        return codes
+
     def upsert_rates(self, records: list[RateRecord]) -> int:
         if not records:
             return 0
@@ -92,6 +105,7 @@ class SupabaseLoader:
             "display_name": record.display_name,
             "category": record.category,
             "unit": record.unit,
+            "enabled_for_pricing": record.enabled_for_pricing,
             "source": "metalpriceapi.com/v1/symbols",
             "documented_at": datetime.now(timezone.utc).isoformat(),
         }

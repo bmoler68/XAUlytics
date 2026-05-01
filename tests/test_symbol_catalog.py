@@ -19,3 +19,4 @@ def test_symbols_response_to_records_sorts_and_maps() -> None:
     assert [row.symbol_code for row in rows] == ["XAU", "ZAR"]
     assert rows[0].display_name == "Gold"
     assert rows[0].category == "precious_metals"
+    assert rows[0].enabled_for_pricing is False

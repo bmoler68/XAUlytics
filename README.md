@@ -11,7 +11,7 @@ Python ETL application that pulls MetalpriceAPI market rates and loads normalize
   - orchestration (`src/xaulytics_etl/etl.py`)
   - CLI entrypoint (`src/xaulytics_etl/cli.py`)
 - Runtime modes:
-  - `daily`: pulls most current rates from `/v1/latest`
+  - `daily`: pulls most current rates from `/v1/latest` using `currencies=` built from DB rows where `enabled_for_pricing=true`
   - `historical` (manual): supports single date or date range using:
     - `/v1/YYYY-MM-DD` for single date
     - `/v1/timeframe` for date ranges
@@ -36,7 +36,7 @@ Based on your requirements and previous planning:
 - `GET /v1/timeframe` for manual historical date-range mode
 - `GET /v1/symbols` for symbol catalog sync (`xaulytics-etl symbols`; quota-free per MetalpriceAPI docs)
 
-The ETL currently requests all rates returned by those endpoints (including Indian symbols when provided by API response), without hardcoded allow-lists.
+MetalpriceAPI free-tier responses require an explicit `currencies` list. Daily and historical runs read enabled codes from `xaulytics.metalprice_api_symbols_v1.enabled_for_pricing` (set in the database after symbol sync).
 
 ## Data Model
 
@@ -70,6 +70,7 @@ Reference rows loaded from MetalpriceAPI `GET /v1/symbols` via `xaulytics-etl sy
 - `display_name` (text)
 - `category` (text): `precious_metals`, `metals`, `india_gold`, `india_silver`, `cryptocurrency`, `energy`, `currency`
 - `unit` (text, nullable): normalized units such as `troy_ounce`, `ounce`, `per_barrel`, `per_gallon`, `per_mmbtu`
+- `enabled_for_pricing` (boolean): when `true`, daily/historical ETL includes this `symbol_code` in MetalpriceAPI `currencies` requests
 - `source` (text): `metalpriceapi.com/v1/symbols` on rows written by this ETL
 - `documented_at` (timestamptz)
 
@@ -100,10 +101,20 @@ See `.env.example`.
 2. Set local environment variables (optionally sourced from Windows Credential Manager).
 3. Run schema SQL in Supabase (`sql/schema.sql`).
 4. Load symbol catalog once (and after API adds new codes): `xaulytics-etl symbols`
-5. Run ETL:
+5. Enable pricing symbols in Supabase (example):
+
+```sql
+update xaulytics.metalprice_api_symbols_v1
+set enabled_for_pricing = true
+where symbol_code in ('XAU','XAG','XPT','XPD','XRH','ALU','XCU','NI','ZNC');
+```
+
+6. Run ETL:
    - Daily: `xaulytics-etl daily`
    - Historical one day: `xaulytics-etl historical --start-date 2026-04-01`
    - Historical range: `xaulytics-etl historical --start-date 2026-04-01 --end-date 2026-04-10`
+
+If no rows have `enabled_for_pricing=true`, daily/historical runs fail fast with a clear configuration error.
 
 ## Docker
 

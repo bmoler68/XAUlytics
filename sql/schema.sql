@@ -34,7 +34,9 @@ create table if not exists xaulytics.etl_runs_v1 (
 create index if not exists idx_etl_runs_v1_started_at
   on xaulytics.etl_runs_v1 (started_at_utc);
 
-create or replace view xaulytics.metal_prices_current as
+drop view if exists xaulytics.metal_prices_current;
+
+create view xaulytics.metal_prices_current as
 select
   pricing_date,
   quote_code,
@@ -47,7 +49,9 @@ select
   ingested_at_utc
 from xaulytics.metal_prices_v1;
 
-create or replace view xaulytics.etl_runs_current as
+drop view if exists xaulytics.etl_runs_current;
+
+create view xaulytics.etl_runs_current as
 select
   run_id,
   mode,
@@ -71,6 +75,7 @@ create table if not exists xaulytics.metalprice_api_symbols_v1 (
   display_name text not null,
   category text not null,
   unit text null,
+  enabled_for_pricing boolean not null default false,
   source text not null default 'metalpriceapi.com/v1/symbols',
   documented_at timestamptz not null default now()
 );
@@ -78,12 +83,19 @@ create table if not exists xaulytics.metalprice_api_symbols_v1 (
 create index if not exists idx_metalprice_api_symbols_v1_category
   on xaulytics.metalprice_api_symbols_v1 (category);
 
-create or replace view xaulytics.metalprice_api_symbols_current as
+create index if not exists idx_metalprice_api_symbols_v1_enabled_true
+  on xaulytics.metalprice_api_symbols_v1 (symbol_code)
+  where enabled_for_pricing = true;
+
+drop view if exists xaulytics.metalprice_api_symbols_current;
+
+create view xaulytics.metalprice_api_symbols_current as
 select
   symbol_code,
   display_name,
   category,
   unit,
+  enabled_for_pricing,
   source,
   documented_at
 from xaulytics.metalprice_api_symbols_v1;
