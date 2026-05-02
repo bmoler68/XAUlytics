@@ -37,6 +37,12 @@ class MetalpriceApiClient:
             params["currencies"] = currencies
         return self._get("/v1/latest", params)
 
+    def get_yesterday_rates(self, base_currency: str = "USD", currencies: str | None = None) -> dict[str, Any]:
+        params: dict[str, Any] = {"base": base_currency}
+        if currencies:
+            params["currencies"] = currencies
+        return self._get("/v1/yesterday", params)
+
     def get_historical_date_rates(
         self,
         pricing_date: date,

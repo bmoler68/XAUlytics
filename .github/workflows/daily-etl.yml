@@ -2,7 +2,8 @@ name: Daily ETL
 
 on:
   schedule:
-    - cron: "15 0 * * *"
+    # 00:10 UTC daily (after MetalpriceAPI prior-day data per their 00:05 GMT note).
+    - cron: "10 0 * * *"
   workflow_dispatch:
 
 jobs:

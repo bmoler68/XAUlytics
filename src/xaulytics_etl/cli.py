@@ -17,7 +17,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("daily", help="Run daily ETL for latest available rates.")
+    subparsers.add_parser(
+        "daily",
+        help="Run daily ETL via MetalpriceAPI /v1/yesterday (prior UTC calendar day; schedule after data is published).",
+    )
 
     subparsers.add_parser(
         "symbols",

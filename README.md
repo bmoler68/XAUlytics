@@ -11,7 +11,7 @@ Python ETL application that pulls MetalpriceAPI market rates and loads normalize
   - orchestration (`src/xaulytics_etl/etl.py`)
   - CLI entrypoint (`src/xaulytics_etl/cli.py`)
 - Runtime modes:
-  - `daily`: pulls most current rates from `/v1/latest` using `currencies=` built from DB rows where `enabled_for_pricing=true`
+  - `daily`: pulls prior calendar day rates from `/v1/yesterday` using `currencies=` built from DB rows where `enabled_for_pricing=true` (schedule after MetalpriceAPI publishes prior-day history, e.g. after 00:05 GMT)
   - `historical` (manual): supports single date or date range using:
     - `/v1/YYYY-MM-DD` for single date
     - `/v1/timeframe` for date ranges
@@ -31,7 +31,7 @@ Python ETL application that pulls MetalpriceAPI market rates and loads normalize
 
 Based on your requirements and previous planning:
 
-- `GET /v1/latest` for daily mode (most current available closing-like delayed data on free plan)
+- `GET /v1/yesterday` for daily mode (prior UTC calendar day; MetalpriceAPI documents prior-day history availability from 00:05 GMT)
 - `GET /v1/YYYY-MM-DD` for historical single-date mode
 - `GET /v1/timeframe` for manual historical date-range mode
 - `GET /v1/symbols` for symbol catalog sync (`xaulytics-etl symbols`; quota-free per MetalpriceAPI docs)

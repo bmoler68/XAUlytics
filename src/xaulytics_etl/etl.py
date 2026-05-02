@@ -9,11 +9,7 @@ from xaulytics_etl.extract import MetalpriceApiClient
 from xaulytics_etl.load import SupabaseLoader
 from xaulytics_etl.logging_utils import configure_logging
 from xaulytics_etl.symbol_catalog import symbols_response_to_records
-from xaulytics_etl.transform import (
-    normalize_historical_payload,
-    normalize_latest_payload,
-    normalize_timeframe_payload,
-)
+from xaulytics_etl.transform import normalize_historical_payload, normalize_timeframe_payload
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,8 +41,8 @@ def run_daily() -> int:
     run_id = loader.create_run_log(mode="daily", requested_start_date=None, requested_end_date=None)
     try:
         currencies = _pricing_currencies_csv(loader)
-        payload = client.get_latest_rates(base_currency="USD", currencies=currencies)
-        records = normalize_latest_payload(payload)
+        payload = client.get_yesterday_rates(base_currency="USD", currencies=currencies)
+        records = normalize_historical_payload(payload, endpoint_name="yesterday")
         inserted_count = loader.upsert_rates(records)
         loader.complete_run_log(run_id, status="success", row_count=inserted_count)
         LOGGER.info("Daily ETL completed", extra={"run_id": run_id, "extra_data": {"rows": inserted_count}})

@@ -1,4 +1,8 @@
-from xaulytics_etl.transform import normalize_latest_payload, normalize_timeframe_payload
+from xaulytics_etl.transform import (
+    normalize_historical_payload,
+    normalize_latest_payload,
+    normalize_timeframe_payload,
+)
 
 
 def test_normalize_latest_payload_filters_reciprocals_and_computes_price() -> None:
@@ -23,6 +27,18 @@ def test_normalize_latest_payload_filters_reciprocals_and_computes_price() -> No
     xau_record = [record for record in records if record.quote_code == "XAU"][0]
     assert round(xau_record.price_usd, 2) == 2000.00
     assert xau_record.unit == "troy_ounce"
+
+
+def test_normalize_historical_payload_yesterday_sets_source_endpoint() -> None:
+    payload = {
+        "success": True,
+        "base": "USD",
+        "timestamp": 1714473600,
+        "rates": {"XAU": 0.0005},
+    }
+    records = normalize_historical_payload(payload, endpoint_name="yesterday")
+    assert len(records) == 1
+    assert records[0].source_endpoint == "yesterday"
 
 
 def test_normalize_timeframe_payload_expands_dates() -> None:
