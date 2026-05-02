@@ -66,8 +66,7 @@ from xaulytics.etl_runs_v1;
 
 -- ---------------------------------------------------------------------------
 -- MetalpriceAPI supported symbols (reference catalog)
--- Populated by ETL: xaulytics-etl symbols (GET /v1/symbols; does not count
--- toward MetalpriceAPI monthly quota per API documentation).
+-- Populated by ETL: xaulytics-etl symbols (GET /v1/symbols).
 -- ---------------------------------------------------------------------------
 
 create table if not exists xaulytics.metalprice_api_symbols_v1 (

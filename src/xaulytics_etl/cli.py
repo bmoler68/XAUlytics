@@ -24,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser(
         "symbols",
-        help="Sync supported symbol codes from MetalpriceAPI /v1/symbols (does not count toward API quota).",
+        help="Sync supported symbol codes from MetalpriceAPI GET /v1/symbols.",
     )
 
     historical_parser = subparsers.add_parser(

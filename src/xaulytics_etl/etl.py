@@ -20,7 +20,7 @@ def _pricing_currencies_csv(loader: SupabaseLoader) -> str:
         raise ValueError(
             "No symbols have enabled_for_pricing=true in the symbol catalog table. "
             "Run `xaulytics-etl symbols`, then set enabled_for_pricing for the codes you want "
-            "MetalpriceAPI to return (free tier requires an explicit currencies list)."
+            "MetalpriceAPI to return (enable symbols in the catalog with enabled_for_pricing=true)."
         )
     return ",".join(codes)
 
@@ -105,7 +105,7 @@ def run_historical(start_date: date, end_date: date) -> int:
 
 
 def run_sync_symbols_catalog() -> int:
-    """Fetch /v1/symbols (quota-free) and upsert into Supabase symbol catalog."""
+    """Fetch GET /v1/symbols and upsert into Supabase symbol catalog."""
     settings = load_settings()
     configure_logging(settings.log_level)
     client = MetalpriceApiClient(settings.metalpriceapi_api_key, settings.metalpriceapi_base_url)

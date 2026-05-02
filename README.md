@@ -1,189 +1,186 @@
 # XAUlytics
 
-Python ETL application that pulls MetalpriceAPI market rates and loads normalized records into Supabase.
+**Demonstration Metal Price ETL** — ingests metal and FX-related quotes from [MetalpriceAPI](https://metalpriceapi.com/), normalizes them in **Python**, and loads idempotent rows into **Supabase** (PostgreSQL). The stack includes **Docker** (containerized CLI for Linux-style runs anywhere) and **GitHub Actions** for scheduled jobs. Use it as a reference for extract → transform → load layout, environment-driven configuration, and automation.
 
-## What Was Implemented
+## What this project demonstrates
 
-- Python package with clear ETL separation:
-  - `extract` (`src/xaulytics_etl/extract.py`)
-  - `transform` (`src/xaulytics_etl/transform.py`)
-  - `load` (`src/xaulytics_etl/load.py`)
-  - orchestration (`src/xaulytics_etl/etl.py`)
-  - CLI entrypoint (`src/xaulytics_etl/cli.py`)
-- Runtime modes:
-  - `daily`: pulls prior calendar day rates from `/v1/yesterday` using `currencies=` built from DB rows where `enabled_for_pricing=true` (schedule after MetalpriceAPI publishes prior-day history, e.g. after 00:05 GMT)
-  - `historical` (manual): supports single date or date range using:
-    - `/v1/YYYY-MM-DD` for single date
-    - `/v1/timeframe` for date ranges
-  - `symbols`: loads `/v1/symbols` into `metalprice_api_symbols_v1` (documented as not counting toward monthly API quota)
-- Supabase naming/versioning convention applied:
-  - schema: `xaulytics`
-  - tables: `metal_prices_v1`, `etl_runs_v1`, `metalprice_api_symbols_v1` (reference catalog; filled via `xaulytics-etl symbols`)
-  - stable views: `metal_prices_current`, `etl_runs_current`, `metalprice_api_symbols_current`
-  - SQL setup file: `sql/schema.sql` (DDL only for symbols table; run `symbols` command after schema apply)
-- Idempotent load behavior via upsert on `(pricing_date, quote_code)`.
-- Structured JSON logging for ETL phases and run metadata.
-- Dockerfile for Linux container execution.
-- GitHub Actions workflow for daily scheduled runs (`.github/workflows/daily-etl.yml`).
-- Unit tests: `tests/test_transform.py`, `tests/test_symbol_catalog.py`
+- **Separation of concerns**: `extract` (HTTP client), `transform` (pure normalization), `load` (Supabase upserts), `etl` orchestration, CLI entrypoint.
+- **Operational hygiene**: configuration only from environment variables; structured logging; run logs in `etl_runs_v1`; upserts keyed by `(pricing_date, quote_code)` so reruns do not duplicate rows.
+- **API-conscious design**: builds explicit `currencies=` lists from the symbol catalog (`enabled_for_pricing`) so requests stay predictable and minimal.
+- **Automation-friendly**: Dockerfile for Linux-style runs; workflows for scheduled daily loads and optional manual historical backfills.
 
-## API Endpoints Used
+## Requirements
 
-Based on your requirements and previous planning:
+- **Python** 3.12+
+- **Supabase** project (service role or compatible secret key for server-side writes)
+- **MetalpriceAPI** account and API key ([MetalpriceAPI documentation](https://metalpriceapi.com/documentation))
 
-- `GET /v1/yesterday` for daily mode (prior UTC calendar day; MetalpriceAPI documents prior-day history availability from 00:05 GMT)
-- `GET /v1/YYYY-MM-DD` for historical single-date mode
-- `GET /v1/timeframe` for manual historical date-range mode
-- `GET /v1/symbols` for symbol catalog sync (`xaulytics-etl symbols`; quota-free per MetalpriceAPI docs)
+## Repository layout
 
-MetalpriceAPI free-tier responses require an explicit `currencies` list. Daily and historical runs read enabled codes from `xaulytics.metalprice_api_symbols_v1.enabled_for_pricing` (set in the database after symbol sync).
+| Path | Role |
+|------|------|
+| `src/xaulytics_etl/extract.py` | MetalpriceAPI client (`requests`) |
+| `src/xaulytics_etl/transform.py` | Payload → typed rate records |
+| `src/xaulytics_etl/load.py` | Supabase upserts and run logging |
+| `src/xaulytics_etl/etl.py` | Mode orchestration (`daily`, `historical`, `symbols`) |
+| `src/xaulytics_etl/cli.py` | `xaulytics-etl` CLI |
+| `sql/schema.sql` | Schema `xaulytics`, tables, views |
+| `.github/workflows/` | Scheduled daily ETL, manual historical, manual CI |
 
-## Data Model
+## Quick start
 
-### `xaulytics.metal_prices_v1`
+1. Clone the repository and create a virtual environment:
 
-- `pricing_date` (date, PK component)
-- `quote_code` (text, PK component)
-- `base_currency` (text, expected `USD`)
-- `quote_per_base` (numeric): quote units per 1 base currency
-- `price_usd` (numeric): inverse of `quote_per_base`
-- `unit` (text, nullable): inferred unit where possible
-- `source_endpoint` (text)
-- `source_timestamp` (bigint, nullable)
-- `ingested_at_utc` (timestamptz)
+   ```bash
+   python -m venv .venv
+   .venv\Scripts\activate   # Windows
+   # source .venv/bin/activate   # Linux / macOS
+   pip install -e ".[dev]"
+   ```
 
-### `xaulytics.etl_runs_v1`
+2. Copy `.env.example` to `.env` and set secrets (never commit `.env`).
 
-- `run_id` (uuid, PK)
-- `mode` (`daily`, `historical_manual`, `symbols_catalog`)
-- `requested_start_date`, `requested_end_date`
-- `status` (`started`, `success`, `failed`)
-- `row_count`
-- `error_message`
-- `started_at_utc`, `completed_at_utc`
+3. In Supabase, run `sql/schema.sql` (SQL editor or migration). Ensure the **`xaulytics`** schema is exposed to PostgREST if you query it from client apps.
 
-### `xaulytics.metalprice_api_symbols_v1`
+4. Sync the symbol catalog:
 
-Reference rows loaded from MetalpriceAPI `GET /v1/symbols` via `xaulytics-etl symbols`. Use for joins, validation, and labeling. `display_name` comes from the API; `category` and `unit` are best-effort heuristics in `src/xaulytics_etl/symbol_catalog.py` (unknown codes default to `currency` with null unit).
+   ```bash
+   xaulytics-etl symbols
+   ```
 
-- `symbol_code` (text, PK)
-- `display_name` (text)
-- `category` (text): `precious_metals`, `metals`, `india_gold`, `india_silver`, `cryptocurrency`, `energy`, `currency`
-- `unit` (text, nullable): normalized units such as `troy_ounce`, `ounce`, `per_barrel`, `per_gallon`, `per_mmbtu`
-- `enabled_for_pricing` (boolean): when `true`, daily/historical ETL includes this `symbol_code` in MetalpriceAPI `currencies` requests
-- `source` (text): `metalpriceapi.com/v1/symbols` on rows written by this ETL
-- `documented_at` (timestamptz)
+5. Choose which symbols participate in pricing requests by setting `enabled_for_pricing = true` (this ETL builds the MetalpriceAPI `currencies` parameter from these rows):
 
-Downstream queries should prefer `xaulytics.metalprice_api_symbols_current` (stable name) over the versioned table when you introduce `_v2` later.
+   ```sql
+   update xaulytics.metalprice_api_symbols_v1
+   set enabled_for_pricing = true
+   where symbol_code in ('XAU','XAG','XPT','XPD','XRH','ALU','XCU','NI','ZNC');
+   ```
+
+6. Run loads:
+
+   ```bash
+   xaulytics-etl daily
+   xaulytics-etl historical --start-date 2026-04-01
+   xaulytics-etl historical --start-date 2026-04-01 --end-date 2026-04-10
+   ```
+
+If no symbols have `enabled_for_pricing = true`, **daily** and **historical** commands exit early with a clear configuration error.
+
+## CLI modes
+
+| Command | Behavior |
+|---------|-----------|
+| `xaulytics-etl symbols` | `GET /v1/symbols` → upsert reference catalog (`metalprice_api_symbols_v1`). |
+| `xaulytics-etl daily` | `GET /v1/yesterday` with `base=USD` and DB-driven `currencies`. Loads the **prior UTC calendar day** (schedule after MetalpriceAPI publishes prior-day history; they document availability from **00:05 GMT**). |
+| `xaulytics-etl historical` | Single date: `GET /v1/YYYY-MM-DD`. Range: `GET /v1/timeframe`. Same `currencies` behavior as daily. |
+
+All USD-base conventions and unit hints follow transform logic in `transform.py` and `symbol_catalog.py`.
+
+## MetalpriceAPI endpoints
+
+| Endpoint | Used by |
+|----------|---------|
+| `GET /v1/yesterday` | `daily` |
+| `GET /v1/YYYY-MM-DD` | `historical` (single date) |
+| `GET /v1/timeframe` | `historical` (range) |
+| `GET /v1/symbols` | `symbols` |
+
+This project builds the **`currencies`** query parameter from `metalprice_api_symbols_v1.enabled_for_pricing`.
+
+### Daily timing note
+
+MetalpriceAPI describes **prior-day** historical data as available from **00:05 GMT**. The included GitHub Action schedules **daily** around **00:10 UTC** so `/v1/yesterday` is likely populated. Adjust cron if your provider window differs.
 
 ## Configuration
 
-Use environment variables (no secrets hardcoded):
+Read from the environment (see `.env.example`):
 
-- `METALPRICEAPI_API_KEY`
-- `METALPRICEAPI_BASE_URL` (default: `https://api.metalpriceapi.com`)
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `SUPABASE_SCHEMA` (default: `xaulytics`)
-- `SUPABASE_METAL_PRICES_TABLE` (default: `metal_prices_v1`)
-- `SUPABASE_ETL_RUNS_TABLE` (default: `etl_runs_v1`)
-- `SUPABASE_SYMBOLS_TABLE` (default: `metalprice_api_symbols_v1`)
-- `LOG_LEVEL` (default: `INFO`)
+| Variable | Purpose |
+|----------|---------|
+| `METALPRICEAPI_API_KEY` | API key |
+| `METALPRICEAPI_BASE_URL` | Default `https://api.metalpriceapi.com` (include `https://`) |
+| `SUPABASE_URL` | Project URL (no `/rest/v1/` suffix) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-side key (CI: GitHub Secret only) |
+| `SUPABASE_SCHEMA` | Default `xaulytics` |
+| `SUPABASE_METAL_PRICES_TABLE` | Default `metal_prices_v1` |
+| `SUPABASE_ETL_RUNS_TABLE` | Default `etl_runs_v1` |
+| `SUPABASE_SYMBOLS_TABLE` | Default `metalprice_api_symbols_v1` |
+| `LOG_LEVEL` | Default `INFO` |
 
-See `.env.example`.
+## Data model (schema `xaulytics`)
 
-## Local Development
+### `metal_prices_v1`
 
-1. Create virtual environment and install:
-   - `python -m venv .venv`
-   - `.venv\Scripts\activate` (Windows)
-   - `pip install -e .[dev]`
-2. Set local environment variables (optionally sourced from Windows Credential Manager).
-3. Run schema SQL in Supabase (`sql/schema.sql`).
-4. Load symbol catalog once (and after API adds new codes): `xaulytics-etl symbols`
-5. Enable pricing symbols in Supabase (example):
+Normalized rates: composite primary key `(pricing_date, quote_code)`. Includes `quote_per_base`, `price_usd`, optional `unit`, `source_endpoint`, `source_timestamp`, `ingested_at_utc`.
 
-```sql
-update xaulytics.metalprice_api_symbols_v1
-set enabled_for_pricing = true
-where symbol_code in ('XAU','XAG','XPT','XPD','XRH','ALU','XCU','NI','ZNC');
-```
+### `etl_runs_v1`
 
-6. Run ETL:
-   - Daily: `xaulytics-etl daily`
-   - Historical one day: `xaulytics-etl historical --start-date 2026-04-01`
-   - Historical range: `xaulytics-etl historical --start-date 2026-04-01 --end-date 2026-04-10`
+One row per run: `run_id`, `mode`, optional requested date range, `status`, `row_count`, `error_message`, timestamps.
 
-If no rows have `enabled_for_pricing=true`, daily/historical runs fail fast with a clear configuration error.
+### `metalprice_api_symbols_v1`
+
+Catalog from `GET /v1/symbols`. Important column: **`enabled_for_pricing`** — drives `currencies` for pricing endpoints. Stable view: `metalprice_api_symbols_current`.
+
+Views **`metal_prices_current`**, **`etl_runs_current`**, **`metalprice_api_symbols_current`** mirror versioned tables for stable downstream naming.
 
 ## Docker
 
-Build and run:
-
-- `docker build -t xaulytics-etl:latest .`
-- `docker run --rm --env-file .env xaulytics-etl:latest daily`
-
-Historical manual run in container:
-
-- `docker run --rm --env-file .env xaulytics-etl:latest historical --start-date 2026-04-01 --end-date 2026-04-05`
-
-Symbol catalog sync in container:
-
-- `docker run --rm --env-file .env xaulytics-etl:latest symbols`
+```bash
+docker build -t xaulytics-etl:latest .
+docker run --rm --env-file .env xaulytics-etl:latest daily
+docker run --rm --env-file .env xaulytics-etl:latest historical --start-date 2026-04-01 --end-date 2026-04-05
+docker run --rm --env-file .env xaulytics-etl:latest symbols
+```
 
 ## GitHub Actions
 
-Workflows:
+| Workflow | Purpose |
+|----------|---------|
+| `daily-etl.yml` | Schedule: `symbols` then `daily` |
+| `historical-etl.yml` | Manual: inputs `start_date` / `end_date`, then `symbols` + `historical` |
+| `ci.yml` | Manual `pytest` (Python 3.12) |
 
-- Daily ETL scheduler: `.github/workflows/daily-etl.yml` (runs `xaulytics-etl symbols` then `xaulytics-etl daily`)
-- Historical ETL (manual only): `.github/workflows/historical-etl.yml` (runs `symbols` then `historical` for the chosen date range)
-- CI tests (manual only): `.github/workflows/ci.yml`
+Repository secrets (names must match workflow `env`): `METALPRICEAPI_API_KEY`, `METALPRICEAPI_BASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 
-Configure these repository secrets:
+### Run CI from GitHub
 
-- `METALPRICEAPI_API_KEY`
-- `METALPRICEAPI_BASE_URL` (optional; defaults to US endpoint if omitted locally)
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+**Actions** → **CI** → **Run workflow**.
 
-### Running CI Manually
+### Run historical ETL from GitHub
 
-1. Open your repository in GitHub.
-2. Go to **Actions**.
-3. Select the **CI** workflow.
-4. Click **Run workflow** and start the run.
+**Actions** → **Historical ETL (Manual)** → **Run workflow** → set `start_date` and `end_date` (`YYYY-MM-DD`).
 
-The CI workflow runs `pytest` using Python 3.12 and does not auto-run on push or pull request.
+## Tests
 
-### Running Historical ETL Manually
+```bash
+pip install -e ".[dev]"
+pytest
+```
 
-1. Open your repository in GitHub.
-2. Go to **Actions**.
-3. Select **Historical ETL (Manual)**.
-4. Click **Run workflow**.
-5. Provide:
-   - `start_date` in `YYYY-MM-DD`
-   - `end_date` in `YYYY-MM-DD`
-6. Start the run.
+## Attribution
 
-The workflow first syncs the symbol catalog (`xaulytics-etl symbols`), then runs `xaulytics-etl historical --start-date <start_date> --end-date <end_date>`.
+MetalpriceAPI requires attribution when displaying derived data. Use exactly (vendor-supplied link titles):
 
-## Attribution Requirement
+**Text**
 
-When data is displayed in docs/pages, include:
+```html
+Powered by <a href="https://metalpriceapi.com/" title="Free Precious Metal Rates API">MetalpriceAPI.com</a>
+```
 
-- Text: `Powered by <a href="https://metalpriceapi.com/" title="Free Precious Metal Rates API">MetalpriceAPI.com</a>`
-- Image: `<a href="https://metalpriceapi.com/" title="Free Precious Metal Rates API"><img src='https://metalpriceapi.com/logo-dark.png' alt="Precious metal data by MetalpriceAPI.com" border="0" height="26"></a>`
+**Image**
 
-## What Still Needs To Be Done
+```html
+<a href="https://metalpriceapi.com/" title="Free Precious Metal Rates API"><img src='https://metalpriceapi.com/logo-dark.png' alt="Precious metal data by MetalpriceAPI.com" border="0" height="26"></a>
+```
 
-- Run SQL migration in your Supabase project and verify permissions for service-role usage.
-- Add integration tests with mocked MetalpriceAPI and Supabase responses.
-- Add request-budget guardrails (for free-plan limit monitoring and abort thresholds).
-- Tighten symbol `category`/`unit` heuristics if MetalpriceAPI adds codes that do not match current patterns (unknown codes default to `currency`).
-- Add retry/backoff policy with explicit jitter and failure classification (currently relies on request exceptions and run-failure logging).
-- Add alerting/notifications for failed scheduled runs (email/Slack/etc.).
+## License
 
-## Notes About Closing Prices
+This project is licensed under the MIT License.
 
-On free plan, MetalpriceAPI provides daily delayed data. This ETL treats that as the most current closing-style value available for daily ingestion. For manual historical loads, specific dates and date ranges are supported through historical/timeframe endpoints.
+Copyright (c) 2026 Brian Moler
+
+See [LICENSE](LICENSE).
+
+## Contributing
+
+Since this application is an experiment in AI development, contributions are not currently being accepted. This allows the project to remain completely AI-developed and maintained, which is central to the experimental nature of this project. However, you are free to clone the repository and create your own forks or modifications for personal use.
