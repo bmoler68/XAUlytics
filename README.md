@@ -1,6 +1,6 @@
 # XAUlytics
 
-**Demonstration Metal Price ETL** — ingests metal and FX-related quotes from [MetalpriceAPI](https://metalpriceapi.com/), normalizes them in **Python**, and loads idempotent rows into **Supabase** (PostgreSQL). The stack includes **Docker** (containerized CLI for Linux-style runs anywhere) and **GitHub Actions** for scheduled jobs. Use it as a reference for extract → transform → load layout, environment-driven configuration, and automation.
+**Demonstration Metal Price ETL** — ingests metal and FX-related quotes from [MetalpriceAPI](https://metalpriceapi.com/), normalizes them in **Python**, and loads idempotent rows into **Supabase** (PostgreSQL). A **static browser dashboard** reads pricing and symbol catalog data from Supabase only (no MetalpriceAPI calls from the browser). The stack includes **Docker** (containerized CLI for Linux-style runs anywhere) and **GitHub Actions** for scheduled jobs. Use it as a reference for extract → transform → load layout, environment-driven configuration, and automation.
 
 ## What this project demonstrates
 
@@ -8,7 +8,8 @@
 - **Operational hygiene**: configuration only from environment variables; JSON logs to stdout; run logs in `etl_runs_v1`; upserts keyed by **`(pricing_date, quote_code, base_currency)`** so reruns do not duplicate rows.
 - **API-conscious design**: builds explicit `currencies=` lists from the symbol catalog (`enabled_for_pricing`) so requests stay predictable and minimal.
 - **Multi-base spot loads**: `METALPRICEAPI_BASE_CURRENCIES` drives one MetalpriceAPI spot request per base (`/v1/yesterday`, `/v1/{date}`, `/v1/timeframe`). Optional **`METALPRICEAPI_ENABLE_OHLC`** adds **`GET /v1/ohlc`** per stored row (pair uses that row’s `base_currency`).
-- **Automation-friendly**: Dockerfile for Linux-style runs; workflows for scheduled daily loads and optional manual historical backfills.
+- **Bid/ask style symbols**: when enabled in the catalog (e.g. `XAU-BID`, `XAU-ASK`), they load like other quotes and can appear in the dashboard cards alongside spot.
+- **Automation-friendly**: Dockerfile for Linux-style runs; workflows for scheduled daily loads and optional manual historical backfills; optional local dashboard via `dashboard/serve.py`.
 
 ## Requirements
 
@@ -30,7 +31,10 @@
 | `src/xaulytics_etl/logging_utils.py` | JSON log formatter |
 | `src/xaulytics_etl/etl.py` | Orchestration: `daily`, `historical`, `symbols` |
 | `src/xaulytics_etl/cli.py` | `xaulytics-etl` CLI entrypoint |
-| `sql/schema.sql` | Schema `xaulytics`, tables, indexes, views, service-role grants |
+| `sql/schema.sql` | Schema **`xaulytics`**, tables, indexes, views (**`security_invoker`** on price/symbol current views), **`service_role`** grants, **`anon` / `authenticated`** read grants for dashboard |
+| `sql/grants_dashboard_anon.sql` | Same **`anon`** read grants in one file (re-run after **`DROP VIEW`** / recreate views) |
+| `dashboard/` | Static UI: `index.html`, `app.js`, `styles.css`; copy **`config.example.js`** → **`config.js`** (gitignored) |
+| `dashboard/serve.py` | Local static HTTP server (`python dashboard/serve.py`) |
 | `.github/workflows/` | Scheduled daily ETL, manual historical, manual CI (`pytest`) |
 
 ## Quick start
@@ -46,7 +50,7 @@
 
 2. Copy `.env.example` to `.env` and set secrets (never commit `.env`). Optional: set **`METALPRICEAPI_BASE_CURRENCIES`** (default when unset is **`USD`** only) and **`METALPRICEAPI_ENABLE_OHLC`** (`true`/`false`).
 
-3. In Supabase, run `sql/schema.sql` (SQL editor or migration). It creates schema **`xaulytics`**, tables with primary key **`(pricing_date, quote_code, base_currency)`**, indexes, views, and grants for **`service_role`**. Ensure the **`xaulytics`** schema is exposed to PostgREST if you query it from client apps.
+3. In Supabase, run **`sql/schema.sql`** (SQL editor or migration). It creates schema **`xaulytics`**, tables with primary key **`(pricing_date, quote_code, base_currency)`**, indexes, mirror views (`*_current`), **`security_invoker`** on **`metal_prices_current`** and **`metalprice_api_symbols_current`**, grants for **`service_role`**, and read grants for **`anon` / `authenticated`** used by the dashboard. **Project Settings → Data API:** expose schema **`xaulytics`** for REST. On existing databases, you can apply only the dashboard block via **`sql/grants_dashboard_anon.sql`** or re-run grants after recreating views (PostgreSQL drops privileges on replaced view objects).
 
 4. Sync the symbol catalog:
 
@@ -54,12 +58,19 @@
    xaulytics-etl symbols
    ```
 
-5. Choose which symbols participate in pricing requests by setting `enabled_for_pricing = true` (this ETL builds the MetalpriceAPI `currencies` parameter from these rows):
+5. Choose which symbols participate in pricing requests by setting `enabled_for_pricing = true` (this ETL builds the MetalpriceAPI `currencies` parameter from these rows). Include **`…-BID`** / **`…-ASK`** pairs if you want bid/ask on dashboard cards (example shows spot metals plus industrial examples):
 
    ```sql
    update xaulytics.metalprice_api_symbols_v1
    set enabled_for_pricing = true
-   where symbol_code in ('XAU','XAG','XPT','XPD','XRH','ALU','XCU','NI','ZNC');
+   where symbol_code in (
+     'XAU','XAU-BID','XAU-ASK',
+     'XAG','XAG-BID','XAG-ASK',
+     'XPT','XPT-BID','XPT-ASK',
+     'XPD','XPD-BID','XPD-ASK',
+     'XRH',
+     'ALU','XCU','NI','ZNC'
+   );
    ```
 
 6. Run loads:
@@ -130,7 +141,41 @@ One row per run: `run_id`, **`mode`** (`daily`, `historical_manual`, `symbols_ca
 
 Catalog from `GET /v1/symbols`. Important column: **`enabled_for_pricing`** — drives `currencies` for pricing endpoints. Stable view: `metalprice_api_symbols_current`.
 
-Views **`metal_prices_current`**, **`etl_runs_current`**, **`metalprice_api_symbols_current`** mirror versioned tables for stable downstream naming.
+Views **`metal_prices_current`**, **`etl_runs_current`**, **`metalprice_api_symbols_current`** mirror versioned tables for stable downstream naming. **`metal_prices_current`** and **`metalprice_api_symbols_current`** use **`security_invoker`** so queries respect the caller’s privileges (typical browser calls use the **`anon`** role).
+
+## Dashboard (web)
+
+Static assets under **`dashboard/`** (open via **`dashboard/serve.py`** or any static host). The UI uses the Supabase JS client with your **publishable / anon** key; it **does not** call MetalpriceAPI. The page includes required MetalpriceAPI **attribution** for derived data.
+
+- Cards for configurable **`preciousMetals`** (default `XAU`, `XAG`, `XPT`, `XPD`, `XRH`)
+- **`display_name`** from **`metalprice_api_symbols_current`** when the catalog has a row (sync with **`xaulytics-etl symbols`**)
+- Latest **spot**, **bid**, **ask**, **spread** for the **same `pricing_date`** on all cards (bid/ask need enabled symbols such as `XAU-BID` / `XAU-ASK`)
+- **Spot change** vs the previous **`pricing_date`** returned for the **first** symbol in **`preciousMetals`** (default **`XAU`**): latest and prior dates are shared across cards for that comparison
+- Click a card for trend chart + recent history table (history table **Δ** compares each date to the chronologically previous date **that has data** for that metal)
+
+### Dashboard setup
+
+1. Copy **`dashboard/config.example.js`** to **`dashboard/config.js`** (ignored by git).
+2. Set at minimum:
+   - **`supabaseUrl`**
+   - **`supabaseAnonKey`** (publishable / anon only — never the service role secret in the browser)
+   - **`schema`** (default `xaulytics`)
+   - **`baseCurrency`** (default `USD`)
+3. Optional overrides (see **`config.example.js`**): **`pricesRelation`** (default **`metal_prices_current`**), **`symbolsRelation`** (default **`metalprice_api_symbols_current`**), **`preciousMetals`**, **`historyDays`**.
+4. From the repo root, run the local static server and open the printed URL:
+
+   ```bash
+   python dashboard/serve.py
+   ```
+
+   Options: **`--port`** / **`-p`**, **`--bind`** / **`-b`** (e.g. `0.0.0.0`). Opening **`index.html`** via **`file://`** may work but serving avoids common browser restrictions.
+
+### Data expectations
+
+- Enable bid/ask symbols in **`metalprice_api_symbols_v1`** when you want spread rows (e.g. `XAU-BID`, `XAU-ASK`; **`XRH`** often has spot only).
+- **Permissions:** **`sql/schema.sql`** grants **`anon` / `authenticated`** **`USAGE`** on **`xaulytics`** and **`SELECT`** on **`metal_prices_v1`**, **`metal_prices_current`**, **`metalprice_api_symbols_v1`**, and **`metalprice_api_symbols_current`**. Re-run **`sql/grants_dashboard_anon.sql`** after **`DROP VIEW`** / **`CREATE VIEW`** if you see **`permission denied for view …`**. Missing **`USAGE`** on the schema surfaces as **`permission denied for schema xaulytics`**.
+- **`pricesRelation`** defaults to **`metal_prices_current`**; if that view is stale, recreate it from **`sql/schema.sql`** or point **`pricesRelation`** at **`metal_prices_v1`** temporarily.
+- **Expose schema:** Supabase **Project Settings → Data API**: include **`xaulytics`** in **exposed schemas** so PostgREST serves the **`xaulytics`** tables/views.
 
 ## Docker
 

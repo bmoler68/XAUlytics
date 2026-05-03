@@ -120,3 +120,25 @@ grant select, insert, update on table xaulytics.metalprice_api_symbols_v1 to ser
 grant select on table xaulytics.metal_prices_current to service_role;
 grant select on table xaulytics.etl_runs_current to service_role;
 grant select on table xaulytics.metalprice_api_symbols_current to service_role;
+
+-- ---------------------------------------------------------------------------
+-- PostgREST / browser dashboard (publishable anon JWT role).
+-- 1) Run this SQL in Supabase (or apply full schema on new projects).
+-- 2) Supabase Dashboard → Settings → Data API → add xaulytics to exposed schemas
+--    so REST requests can use schema xaulytics.
+-- 3) After DROP/CREATE on metal_prices_current, re-run grants (see grants_dashboard_anon.sql).
+-- Grants below allow read-only price data only (no catalog / ETL run leakage).
+-- ---------------------------------------------------------------------------
+
+grant usage on schema xaulytics to anon, authenticated;
+
+grant select on table xaulytics.metal_prices_v1 to anon, authenticated;
+grant select on table xaulytics.metal_prices_current to anon, authenticated;
+grant select on table xaulytics.metalprice_api_symbols_v1 to anon, authenticated;
+grant select on table xaulytics.metalprice_api_symbols_current to anon, authenticated;
+
+alter view xaulytics.metal_prices_current
+set (security_invoker = on);
+
+alter view xaulytics.metalprice_api_symbols_current
+set (security_invoker = on);
