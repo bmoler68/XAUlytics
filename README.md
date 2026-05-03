@@ -5,8 +5,9 @@
 ## What this project demonstrates
 
 - **Separation of concerns**: `extract` (HTTP client), `transform` (pure normalization), `load` (Supabase upserts), `etl` orchestration, CLI entrypoint.
-- **Operational hygiene**: configuration only from environment variables; structured logging; run logs in `etl_runs_v1`; upserts keyed by `(pricing_date, quote_code)` so reruns do not duplicate rows.
+- **Operational hygiene**: configuration only from environment variables; JSON logs to stdout; run logs in `etl_runs_v1`; upserts keyed by **`(pricing_date, quote_code, base_currency)`** so reruns do not duplicate rows.
 - **API-conscious design**: builds explicit `currencies=` lists from the symbol catalog (`enabled_for_pricing`) so requests stay predictable and minimal.
+- **Multi-base spot loads**: `METALPRICEAPI_BASE_CURRENCIES` drives one MetalpriceAPI spot request per base (`/v1/yesterday`, `/v1/{date}`, `/v1/timeframe`). Optional **`METALPRICEAPI_ENABLE_OHLC`** adds **`GET /v1/ohlc`** per stored row (pair uses that row’s `base_currency`).
 - **Automation-friendly**: Dockerfile for Linux-style runs; workflows for scheduled daily loads and optional manual historical backfills.
 
 ## Requirements
@@ -22,10 +23,15 @@
 | `src/xaulytics_etl/extract.py` | MetalpriceAPI client (`requests`) |
 | `src/xaulytics_etl/transform.py` | Payload → typed rate records |
 | `src/xaulytics_etl/load.py` | Supabase upserts and run logging |
-| `src/xaulytics_etl/etl.py` | Mode orchestration (`daily`, `historical`, `symbols`) |
-| `src/xaulytics_etl/cli.py` | `xaulytics-etl` CLI |
-| `sql/schema.sql` | Schema `xaulytics`, tables, views |
-| `.github/workflows/` | Scheduled daily ETL, manual historical, manual CI |
+| `src/xaulytics_etl/config.py` / `env_parsing.py` | Settings from environment variables |
+| `src/xaulytics_etl/ohlc_params.py` | `/v1/ohlc` query params from symbol + `base_currency` |
+| `src/xaulytics_etl/models.py` | `RateRecord`, `SymbolCatalogRecord` |
+| `src/xaulytics_etl/symbol_catalog.py` | Symbol metadata heuristics from `/v1/symbols` |
+| `src/xaulytics_etl/logging_utils.py` | JSON log formatter |
+| `src/xaulytics_etl/etl.py` | Orchestration: `daily`, `historical`, `symbols` |
+| `src/xaulytics_etl/cli.py` | `xaulytics-etl` CLI entrypoint |
+| `sql/schema.sql` | Schema `xaulytics`, tables, indexes, views, service-role grants |
+| `.github/workflows/` | Scheduled daily ETL, manual historical, manual CI (`pytest`) |
 
 ## Quick start
 
@@ -38,9 +44,9 @@
    pip install -e ".[dev]"
    ```
 
-2. Copy `.env.example` to `.env` and set secrets (never commit `.env`).
+2. Copy `.env.example` to `.env` and set secrets (never commit `.env`). Optional: set **`METALPRICEAPI_BASE_CURRENCIES`** (default when unset is **`USD`** only) and **`METALPRICEAPI_ENABLE_OHLC`** (`true`/`false`).
 
-3. In Supabase, run `sql/schema.sql` (SQL editor or migration). Ensure the **`xaulytics`** schema is exposed to PostgREST if you query it from client apps.
+3. In Supabase, run `sql/schema.sql` (SQL editor or migration). It creates schema **`xaulytics`**, tables with primary key **`(pricing_date, quote_code, base_currency)`**, indexes, views, and grants for **`service_role`**. Ensure the **`xaulytics`** schema is exposed to PostgREST if you query it from client apps.
 
 4. Sync the symbol catalog:
 
@@ -103,7 +109,7 @@ Read from the environment (see `.env.example`):
 | `METALPRICEAPI_BASE_CURRENCIES` | Comma-separated bases (e.g. `USD,CAD,AUD,EUR,GBP`). One MetalpriceAPI spot request per base per run. Default when unset: **`USD`** only. |
 | `METALPRICEAPI_ENABLE_OHLC` | `true` / `false` (or `1` / `0`). When `false`, skips **`GET /v1/ohlc`**; **`open_base` … `close_base`** stay null. Default: **`true`**. |
 | `SUPABASE_URL` | Project URL (no `/rest/v1/` suffix) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-side key (CI: GitHub Secret only) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-side Supabase key (JWT **`service_role`** or newer **`sb_secret_…`** key; CI: GitHub Secret only) |
 | `SUPABASE_SCHEMA` | Default `xaulytics` |
 | `SUPABASE_METAL_PRICES_TABLE` | Default `metal_prices_v1` |
 | `SUPABASE_ETL_RUNS_TABLE` | Default `etl_runs_v1` |
@@ -118,7 +124,7 @@ Normalized rates: composite primary key **`(pricing_date, quote_code, base_curre
 
 ### `etl_runs_v1`
 
-One row per run: `run_id`, `mode`, optional requested date range, `status`, `row_count`, `error_message`, timestamps.
+One row per run: `run_id`, **`mode`** (`daily`, `historical_manual`, `symbols_catalog`), optional requested date range, `status`, `row_count`, `error_message`, timestamps.
 
 ### `metalprice_api_symbols_v1`
 
@@ -139,11 +145,13 @@ docker run --rm --env-file .env xaulytics-etl:latest symbols
 
 | Workflow | Purpose |
 |----------|---------|
-| `daily-etl.yml` | Schedule: `symbols` then `daily` |
+| `daily-etl.yml` | Cron schedule + **workflow_dispatch**: `symbols` then `daily` |
 | `historical-etl.yml` | Manual: inputs `start_date` / `end_date`, then `symbols` + `historical` |
 | `ci.yml` | Manual `pytest` (Python 3.12) |
 
-Repository secrets (names must match workflow `env`): `METALPRICEAPI_API_KEY`, `METALPRICEAPI_BASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+**Secrets** (GitHub **Settings → Secrets and variables**): `METALPRICEAPI_API_KEY`, `METALPRICEAPI_BASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+
+**Workflow environment** (set in each YAML file, not secrets): `daily-etl.yml` and `historical-etl.yml` define **`METALPRICEAPI_BASE_CURRENCIES`** and **`METALPRICEAPI_ENABLE_OHLC`** (for example five bases and OHLC on or off). Edit the workflow file to change scheduled behavior; values in `.env.example` apply to local runs only.
 
 ### Run CI from GitHub
 
@@ -157,12 +165,14 @@ Repository secrets (names must match workflow `env`): `METALPRICEAPI_API_KEY`, `
 
 ```bash
 pip install -e ".[dev]"
-pytest
+pytest -q tests
 ```
+
+This matches the **CI** workflow (`pip install -e .[dev]` then `pytest -q tests`). CI runs on **workflow_dispatch** only (not on every push).
 
 ## Attribution
 
-MetalpriceAPI requires attribution when displaying derived data if using the free plan. Use exactly (vendor-supplied link titles):
+MetalpriceAPI requires attribution when displaying derived data. Use exactly (vendor-supplied link titles):
 
 **Text**
 
