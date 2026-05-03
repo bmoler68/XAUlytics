@@ -17,6 +17,10 @@ class JsonFormatter(logging.Formatter):
             payload["run_id"] = record.run_id
         if hasattr(record, "extra_data"):
             payload["extra_data"] = record.extra_data
+        # Pass through logger.info(..., extra={...}) fields used for diagnostics (JsonFormatter otherwise drops them).
+        for key in ("quote_code", "pricing_date", "error"):
+            if hasattr(record, key):
+                payload[key] = getattr(record, key)
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=True)

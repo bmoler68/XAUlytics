@@ -26,7 +26,10 @@ def _enrich_records_with_ohlc(client: MetalpriceApiClient, records: list[RateRec
             o, h, l, c = client.get_ohlc_usd(pd, record.quote_code)
         except Exception as exc:
             LOGGER.warning(
-                "OHLC fetch failed; row stored without open_usd/high_usd/low_usd/close_usd",
+                "OHLC fetch failed for %s on %s: %s; row stored without open_usd/high_usd/low_usd/close_usd",
+                record.quote_code,
+                record.pricing_date,
+                exc,
                 extra={
                     "quote_code": record.quote_code,
                     "pricing_date": record.pricing_date,
