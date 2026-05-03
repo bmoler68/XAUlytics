@@ -74,9 +74,14 @@ class MetalpriceApiClient:
             params["currencies"] = currencies
         return self._get("/v1/timeframe", params)
 
-    def get_ohlc_usd(self, pricing_date: date, quote_code: str) -> tuple[float, float, float, float]:
-        """GET /v1/ohlc — open/high/low/close in USD for the quote currency pair (see MetalpriceAPI docs)."""
-        params = build_ohlc_request_params(pricing_date, quote_code)
+    def get_ohlc(
+        self,
+        pricing_date: date,
+        quote_code: str,
+        spot_base_currency: str,
+    ) -> tuple[float, float, float, float]:
+        """GET /v1/ohlc — open/high/low/close for the pair (see MetalpriceAPI docs)."""
+        params = build_ohlc_request_params(pricing_date, quote_code, spot_base_currency)
         payload = self._get("/v1/ohlc", params)
         rate = payload.get("rate")
         if not isinstance(rate, dict):

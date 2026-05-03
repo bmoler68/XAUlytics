@@ -5,11 +5,22 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+from xaulytics_etl.env_parsing import parse_base_currencies
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
 
 @dataclass(frozen=True)
 class Settings:
     metalpriceapi_api_key: str
     metalpriceapi_base_url: str
+    metalpriceapi_enable_ohlc: bool
+    metalpriceapi_base_currencies: tuple[str, ...]
     supabase_url: str
     supabase_service_role_key: str
     supabase_schema: str
@@ -31,6 +42,8 @@ def load_settings() -> Settings:
     return Settings(
         metalpriceapi_api_key=_required_env("METALPRICEAPI_API_KEY"),
         metalpriceapi_base_url=os.getenv("METALPRICEAPI_BASE_URL", "https://api.metalpriceapi.com"),
+        metalpriceapi_enable_ohlc=_env_bool("METALPRICEAPI_ENABLE_OHLC", default=True),
+        metalpriceapi_base_currencies=parse_base_currencies(os.getenv("METALPRICEAPI_BASE_CURRENCIES")),
         supabase_url=_required_env("SUPABASE_URL"),
         supabase_service_role_key=_required_env("SUPABASE_SERVICE_ROLE_KEY"),
         supabase_schema=os.getenv("SUPABASE_SCHEMA", "xaulytics"),

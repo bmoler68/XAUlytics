@@ -57,7 +57,7 @@ class SupabaseLoader:
         payload = [self._rate_record_to_row(record) for record in records]
         self._client.schema(self._schema).table(self._metal_prices_table).upsert(
             payload,
-            on_conflict="pricing_date,quote_code",
+            on_conflict="pricing_date,quote_code,base_currency",
         ).execute()
         return len(payload)
 
@@ -91,14 +91,14 @@ class SupabaseLoader:
             "quote_code": record.quote_code,
             "base_currency": record.base_currency,
             "quote_per_base": record.quote_per_base,
-            "price_usd": record.price_usd,
+            "price_base": record.price_base,
             "unit": record.unit,
             "source_endpoint": record.source_endpoint,
             "source_timestamp": record.source_timestamp,
-            "open_usd": record.open_usd,
-            "high_usd": record.high_usd,
-            "low_usd": record.low_usd,
-            "close_usd": record.close_usd,
+            "open_base": record.open_base,
+            "high_base": record.high_base,
+            "low_base": record.low_base,
+            "close_base": record.close_base,
             "ingested_at_utc": datetime.now(timezone.utc).isoformat(),
         }
 

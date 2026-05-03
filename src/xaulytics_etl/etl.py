@@ -16,17 +16,17 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _enrich_records_with_ohlc(client: MetalpriceApiClient, records: list[RateRecord]) -> list[RateRecord]:
-    """Merge GET /v1/ohlc USD open/high/low/close into each row (spot fields unchanged)."""
+    """Merge GET /v1/ohlc open/high/low/close into each row (spot fields unchanged). Values match spot base_currency."""
     if not records:
         return records
     enriched: list[RateRecord] = []
     for record in records:
         pd = date.fromisoformat(record.pricing_date)
         try:
-            o, h, l, c = client.get_ohlc_usd(pd, record.quote_code)
+            o, h, l, c = client.get_ohlc(pd, record.quote_code, record.base_currency)
         except Exception as exc:
             LOGGER.warning(
-                "OHLC fetch failed for %s on %s: %s; row stored without open_usd/high_usd/low_usd/close_usd",
+                "OHLC fetch failed for %s on %s: %s; row stored without open_base/high_base/low_base/close_base",
                 record.quote_code,
                 record.pricing_date,
                 exc,
@@ -41,10 +41,10 @@ def _enrich_records_with_ohlc(client: MetalpriceApiClient, records: list[RateRec
         enriched.append(
             replace(
                 record,
-                open_usd=o,
-                high_usd=h,
-                low_usd=l,
-                close_usd=c,
+                open_base=o,
+                high_base=h,
+                low_base=l,
+                close_base=c,
                 source_endpoint=f"{record.source_endpoint}+ohlc",
             )
         )
@@ -78,12 +78,26 @@ def run_daily() -> int:
     run_id = loader.create_run_log(mode="daily", requested_start_date=None, requested_end_date=None)
     try:
         currencies = _pricing_currencies_csv(loader)
-        payload = client.get_yesterday_rates(base_currency="USD", currencies=currencies)
-        records = normalize_historical_payload(payload, endpoint_name="yesterday")
-        records = _enrich_records_with_ohlc(client, records)
-        inserted_count = loader.upsert_rates(records)
+        all_records: list[RateRecord] = []
+        for base_currency in settings.metalpriceapi_base_currencies:
+            payload = client.get_yesterday_rates(base_currency=base_currency, currencies=currencies)
+            records = normalize_historical_payload(payload, endpoint_name="yesterday")
+            if settings.metalpriceapi_enable_ohlc:
+                records = _enrich_records_with_ohlc(client, records)
+            all_records.extend(records)
+        inserted_count = loader.upsert_rates(all_records)
         loader.complete_run_log(run_id, status="success", row_count=inserted_count)
-        LOGGER.info("Daily ETL completed", extra={"run_id": run_id, "extra_data": {"rows": inserted_count}})
+        LOGGER.info(
+            "Daily ETL completed",
+            extra={
+                "run_id": run_id,
+                "extra_data": {
+                    "rows": inserted_count,
+                    "bases": list(settings.metalpriceapi_base_currencies),
+                    "ohlc": settings.metalpriceapi_enable_ohlc,
+                },
+            },
+        )
         return inserted_count
     except Exception as exc:
         loader.complete_run_log(run_id, status="failed", row_count=0, error_message=str(exc))
@@ -111,19 +125,23 @@ def run_historical(start_date: date, end_date: date) -> int:
     )
     try:
         currencies = _pricing_currencies_csv(loader)
-        if start_date == end_date:
-            payload = client.get_historical_date_rates(start_date, base_currency="USD", currencies=currencies)
-            records = normalize_historical_payload(payload, endpoint_name="historical")
-        else:
-            payload = client.get_timeframe_rates(
-                start_date=start_date,
-                end_date=end_date,
-                base_currency="USD",
-                currencies=currencies,
-            )
-            records = normalize_timeframe_payload(payload)
-        records = _enrich_records_with_ohlc(client, records)
-        inserted_count = loader.upsert_rates(records)
+        all_records: list[RateRecord] = []
+        for base_currency in settings.metalpriceapi_base_currencies:
+            if start_date == end_date:
+                payload = client.get_historical_date_rates(start_date, base_currency=base_currency, currencies=currencies)
+                records = normalize_historical_payload(payload, endpoint_name="historical")
+            else:
+                payload = client.get_timeframe_rates(
+                    start_date=start_date,
+                    end_date=end_date,
+                    base_currency=base_currency,
+                    currencies=currencies,
+                )
+                records = normalize_timeframe_payload(payload)
+            if settings.metalpriceapi_enable_ohlc:
+                records = _enrich_records_with_ohlc(client, records)
+            all_records.extend(records)
+        inserted_count = loader.upsert_rates(all_records)
         loader.complete_run_log(run_id, status="success", row_count=inserted_count)
         LOGGER.info(
             "Historical ETL completed",
@@ -133,6 +151,8 @@ def run_historical(start_date: date, end_date: date) -> int:
                     "rows": inserted_count,
                     "start_date": start_date.isoformat(),
                     "end_date": end_date.isoformat(),
+                    "bases": list(settings.metalpriceapi_base_currencies),
+                    "ohlc": settings.metalpriceapi_enable_ohlc,
                 },
             },
         )

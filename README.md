@@ -71,19 +71,19 @@ If no symbols have `enabled_for_pricing = true`, **daily** and **historical** co
 | Command | Behavior |
 |---------|-----------|
 | `xaulytics-etl symbols` | `GET /v1/symbols` → upsert reference catalog (`metalprice_api_symbols_v1`). |
-| `xaulytics-etl daily` | `GET /v1/yesterday` with `base=USD` and DB-driven `currencies`, then **`GET /v1/ohlc`** per symbol for that calendar day (open/high/low/close USD columns). Prior UTC calendar day — schedule after MetalpriceAPI publishes prior-day history (**00:05 GMT** per their docs). |
-| `xaulytics-etl historical` | Spot load via single-date or `timeframe`, then **`GET /v1/ohlc`** per `(pricing_date, symbol)`. Same `currencies` behavior as daily. |
+| `xaulytics-etl daily` | For each configured **`METALPRICEAPI_BASE_CURRENCIES`**, `GET /v1/yesterday` with that `base` and DB-driven `currencies`; optionally **`GET /v1/ohlc`** per row when **`METALPRICEAPI_ENABLE_OHLC=true`**. Prior UTC calendar day — schedule after MetalpriceAPI publishes prior-day history (**00:05 GMT** per their docs). |
+| `xaulytics-etl historical` | Same bases and optional OHLC as daily; spot via single-date or `timeframe`. Same `currencies` list for every base. |
 
-Spot **`price_usd`** conventions and unit hints follow `transform.py` and `symbol_catalog.py`. OHLC pair orientation (`base` / `currency`) follows `ohlc_params.py`.
+Spot **`price_base`** and unit hints follow `transform.py` and `symbol_catalog.py`. OHLC pair orientation (`base` / `currency`) follows `ohlc_params.py`.
 
 ## MetalpriceAPI endpoints
 
 | Endpoint | Used by |
 |----------|---------|
-| `GET /v1/yesterday` | `daily` (spot row; then OHLC per symbol) |
-| `GET /v1/YYYY-MM-DD` | `historical` single date (spot; then OHLC per symbol) |
-| `GET /v1/timeframe` | `historical` range (spot; then OHLC per symbol-date) |
-| `GET /v1/ohlc` | After each spot row is built, enriches open/high/low/close in USD |
+| `GET /v1/yesterday` | `daily` — one call **per** configured `METALPRICEAPI_BASE_CURRENCIES` value (spot; then optional OHLC per row) |
+| `GET /v1/YYYY-MM-DD` | `historical` single date — one call per base (optional OHLC per row) |
+| `GET /v1/timeframe` | `historical` range — one call per base (optional OHLC per row) |
+| `GET /v1/ohlc` | When `METALPRICEAPI_ENABLE_OHLC=true`, one call per output row (pair uses that row’s `base_currency`) |
 | `GET /v1/symbols` | `symbols` |
 
 This project builds the **`currencies`** query parameter from `metalprice_api_symbols_v1.enabled_for_pricing`.
@@ -100,6 +100,8 @@ Read from the environment (see `.env.example`):
 |----------|---------|
 | `METALPRICEAPI_API_KEY` | API key |
 | `METALPRICEAPI_BASE_URL` | Default `https://api.metalpriceapi.com` (include `https://`) |
+| `METALPRICEAPI_BASE_CURRENCIES` | Comma-separated bases (e.g. `USD,CAD,AUD,EUR,GBP`). One MetalpriceAPI spot request per base per run. Default when unset: **`USD`** only. |
+| `METALPRICEAPI_ENABLE_OHLC` | `true` / `false` (or `1` / `0`). When `false`, skips **`GET /v1/ohlc`**; **`open_base` … `close_base`** stay null. Default: **`true`**. |
 | `SUPABASE_URL` | Project URL (no `/rest/v1/` suffix) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-side key (CI: GitHub Secret only) |
 | `SUPABASE_SCHEMA` | Default `xaulytics` |
@@ -112,7 +114,7 @@ Read from the environment (see `.env.example`):
 
 ### `metal_prices_v1`
 
-Normalized rates: composite primary key `(pricing_date, quote_code)`. **`price_usd`** / **`quote_per_base`** come from MetalpriceAPI spot-style endpoints (`/v1/yesterday`, `/v1/YYYY-MM-DD`, `/v1/timeframe`). **`open_usd`**, **`high_usd`**, **`low_usd`**, **`close_usd`** are filled from **`GET /v1/ohlc`** for the same date and symbol when the request succeeds (one OHLC call per row). Also includes optional `unit`, `source_endpoint`, `source_timestamp`, `ingested_at_utc`.
+Normalized rates: composite primary key **`(pricing_date, quote_code, base_currency)`** so the same symbol can exist for USD, CAD, etc. **`price_base`** holds **`1 / quote_per_base`** from the spot endpoints — interpret as **price in `base_currency` units** per unit of quote. **`open_base`**, **`high_base`**, **`low_base`**, **`close_base`** are OHLC from **`GET /v1/ohlc`** in the same **spot base** as the row (e.g. CAD when `base_currency` is CAD), when **`METALPRICEAPI_ENABLE_OHLC`** is true and the request succeeds (one OHLC call per output row). Also includes optional `unit`, `source_endpoint`, `source_timestamp`, `ingested_at_utc`.
 
 ### `etl_runs_v1`
 

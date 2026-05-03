@@ -81,24 +81,25 @@ def _normalize_rates(
     source_endpoint: str,
     source_timestamp: int | None,
 ) -> list[RateRecord]:
+    bc = str(base_currency).strip().upper()
     normalized: list[RateRecord] = []
     for quote_code, raw_rate in rates.items():
-        if not _is_primary_quote(quote_code, base_currency):
+        if not _is_primary_quote(quote_code, bc):
             continue
         try:
             quote_per_base = float(raw_rate)
         except (TypeError, ValueError):
             continue
-        price_usd = _safe_inverse(quote_per_base)
-        if price_usd is None:
+        price_base = _safe_inverse(quote_per_base)
+        if price_base is None:
             continue
         normalized.append(
             RateRecord(
                 pricing_date=pricing_date,
                 quote_code=quote_code,
-                base_currency=base_currency,
+                base_currency=bc,
                 quote_per_base=quote_per_base,
-                price_usd=price_usd,
+                price_base=price_base,
                 unit=_infer_unit(quote_code),
                 source_endpoint=source_endpoint,
                 source_timestamp=source_timestamp,

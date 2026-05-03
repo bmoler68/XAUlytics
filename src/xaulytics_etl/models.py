@@ -9,14 +9,14 @@ class RateRecord:
     quote_code: str
     base_currency: str
     quote_per_base: float
-    price_usd: float
+    price_base: float
     unit: str | None
     source_endpoint: str
     source_timestamp: int | None
-    open_usd: float | None = None
-    high_usd: float | None = None
-    low_usd: float | None = None
-    close_usd: float | None = None
+    open_base: float | None = None
+    high_base: float | None = None
+    low_base: float | None = None
+    close_base: float | None = None
 
 
 @dataclass(frozen=True)

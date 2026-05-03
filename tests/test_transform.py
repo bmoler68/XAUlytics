@@ -25,7 +25,7 @@ def test_normalize_latest_payload_filters_reciprocals_and_computes_price() -> No
     assert "USDXAU" not in quote_codes
 
     xau_record = [record for record in records if record.quote_code == "XAU"][0]
-    assert round(xau_record.price_usd, 2) == 2000.00
+    assert round(xau_record.price_base, 2) == 2000.00
     assert xau_record.unit == "troy_ounce"
 
 

@@ -13,9 +13,9 @@ alwaysApply: true
 - Treat MetalpriceAPI as the source of truth for daily metal prices. Normalize API payloads to deterministic schemas and UTC dates.
 - Minimize MetalpriceAPI usage: only request data needed for each run (daily, historical, symbols) and respect rate limits appropriate to your API plan.
 - Daily ingestion uses `/v1/yesterday` (prior UTC calendar day); support explicit historical loads for user-specified dates or ranges (backfill/repair).
-- Use `USD` as the required base currency for all extracted and stored price records.
+- Configure spot bases with `METALPRICEAPI_BASE_CURRENCIES` (comma-separated; default when unset is USD only). One MetalpriceAPI spot request per base per run. Optional OHLC via `METALPRICEAPI_ENABLE_OHLC`.
 - Enforce unit conventions in transformations: precious metals use troy ounces, non-precious metals use ounces.
-- Design ETL to be idempotent so reruns do not duplicate records; prefer upsert behavior keyed by metal symbol + pricing date.
+- Design ETL to be idempotent so reruns do not duplicate records; upsert on `(pricing_date, quote_code, base_currency)`.
 - Load into Supabase using explicit table contracts, typed records, and retry handling for transient network/API failures.
 - Add structured logging for each ETL phase with run metadata (run id, source date, row counts, load status, errors).
 - Validate data before load (required fields, numeric parsing, date checks) and quarantine/skip invalid rows with diagnostics.
