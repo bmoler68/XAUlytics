@@ -8,10 +8,44 @@ from xaulytics_etl.config import load_settings
 from xaulytics_etl.extract import MetalpriceApiClient
 from xaulytics_etl.load import SupabaseLoader
 from xaulytics_etl.logging_utils import configure_logging
+from xaulytics_etl.models import RateRecord
 from xaulytics_etl.symbol_catalog import symbols_response_to_records
 from xaulytics_etl.transform import normalize_historical_payload, normalize_timeframe_payload
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _enrich_records_with_ohlc(client: MetalpriceApiClient, records: list[RateRecord]) -> list[RateRecord]:
+    """Merge GET /v1/ohlc USD open/high/low/close into each row (spot fields unchanged)."""
+    if not records:
+        return records
+    enriched: list[RateRecord] = []
+    for record in records:
+        pd = date.fromisoformat(record.pricing_date)
+        try:
+            o, h, l, c = client.get_ohlc_usd(pd, record.quote_code)
+        except Exception as exc:
+            LOGGER.warning(
+                "OHLC fetch failed; row stored without open_usd/high_usd/low_usd/close_usd",
+                extra={
+                    "quote_code": record.quote_code,
+                    "pricing_date": record.pricing_date,
+                    "error": str(exc),
+                },
+            )
+            enriched.append(record)
+            continue
+        enriched.append(
+            replace(
+                record,
+                open_usd=o,
+                high_usd=h,
+                low_usd=l,
+                close_usd=c,
+                source_endpoint=f"{record.source_endpoint}+ohlc",
+            )
+        )
+    return enriched
 
 
 def _pricing_currencies_csv(loader: SupabaseLoader) -> str:
@@ -43,6 +77,7 @@ def run_daily() -> int:
         currencies = _pricing_currencies_csv(loader)
         payload = client.get_yesterday_rates(base_currency="USD", currencies=currencies)
         records = normalize_historical_payload(payload, endpoint_name="yesterday")
+        records = _enrich_records_with_ohlc(client, records)
         inserted_count = loader.upsert_rates(records)
         loader.complete_run_log(run_id, status="success", row_count=inserted_count)
         LOGGER.info("Daily ETL completed", extra={"run_id": run_id, "extra_data": {"rows": inserted_count}})
@@ -84,6 +119,7 @@ def run_historical(start_date: date, end_date: date) -> int:
                 currencies=currencies,
             )
             records = normalize_timeframe_payload(payload)
+        records = _enrich_records_with_ohlc(client, records)
         inserted_count = loader.upsert_rates(records)
         loader.complete_run_log(run_id, status="success", row_count=inserted_count)
         LOGGER.info(

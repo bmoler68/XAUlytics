@@ -71,18 +71,19 @@ If no symbols have `enabled_for_pricing = true`, **daily** and **historical** co
 | Command | Behavior |
 |---------|-----------|
 | `xaulytics-etl symbols` | `GET /v1/symbols` → upsert reference catalog (`metalprice_api_symbols_v1`). |
-| `xaulytics-etl daily` | `GET /v1/yesterday` with `base=USD` and DB-driven `currencies`. Loads the **prior UTC calendar day** (schedule after MetalpriceAPI publishes prior-day history; they document availability from **00:05 GMT**). |
-| `xaulytics-etl historical` | Single date: `GET /v1/YYYY-MM-DD`. Range: `GET /v1/timeframe`. Same `currencies` behavior as daily. |
+| `xaulytics-etl daily` | `GET /v1/yesterday` with `base=USD` and DB-driven `currencies`, then **`GET /v1/ohlc`** per symbol for that calendar day (open/high/low/close USD columns). Prior UTC calendar day — schedule after MetalpriceAPI publishes prior-day history (**00:05 GMT** per their docs). |
+| `xaulytics-etl historical` | Spot load via single-date or `timeframe`, then **`GET /v1/ohlc`** per `(pricing_date, symbol)`. Same `currencies` behavior as daily. |
 
-All USD-base conventions and unit hints follow transform logic in `transform.py` and `symbol_catalog.py`.
+Spot **`price_usd`** conventions and unit hints follow `transform.py` and `symbol_catalog.py`. OHLC pair orientation (`base` / `currency`) follows `ohlc_params.py`.
 
 ## MetalpriceAPI endpoints
 
 | Endpoint | Used by |
 |----------|---------|
-| `GET /v1/yesterday` | `daily` |
-| `GET /v1/YYYY-MM-DD` | `historical` (single date) |
-| `GET /v1/timeframe` | `historical` (range) |
+| `GET /v1/yesterday` | `daily` (spot row; then OHLC per symbol) |
+| `GET /v1/YYYY-MM-DD` | `historical` single date (spot; then OHLC per symbol) |
+| `GET /v1/timeframe` | `historical` range (spot; then OHLC per symbol-date) |
+| `GET /v1/ohlc` | After each spot row is built, enriches open/high/low/close in USD |
 | `GET /v1/symbols` | `symbols` |
 
 This project builds the **`currencies`** query parameter from `metalprice_api_symbols_v1.enabled_for_pricing`.
@@ -111,7 +112,7 @@ Read from the environment (see `.env.example`):
 
 ### `metal_prices_v1`
 
-Normalized rates: composite primary key `(pricing_date, quote_code)`. Includes `quote_per_base`, `price_usd`, optional `unit`, `source_endpoint`, `source_timestamp`, `ingested_at_utc`.
+Normalized rates: composite primary key `(pricing_date, quote_code)`. **`price_usd`** / **`quote_per_base`** come from MetalpriceAPI spot-style endpoints (`/v1/yesterday`, `/v1/YYYY-MM-DD`, `/v1/timeframe`). **`open_usd`**, **`high_usd`**, **`low_usd`**, **`close_usd`** are filled from **`GET /v1/ohlc`** for the same date and symbol when the request succeeds (one OHLC call per row). Also includes optional `unit`, `source_endpoint`, `source_timestamp`, `ingested_at_utc`.
 
 ### `etl_runs_v1`
 
@@ -159,7 +160,7 @@ pytest
 
 ## Attribution
 
-MetalpriceAPI requires attribution when displaying derived data. Use exactly (vendor-supplied link titles):
+MetalpriceAPI requires attribution when displaying derived data if using the free plan. Use exactly (vendor-supplied link titles):
 
 **Text**
 

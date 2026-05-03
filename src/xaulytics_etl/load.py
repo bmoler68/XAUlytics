@@ -95,6 +95,10 @@ class SupabaseLoader:
             "unit": record.unit,
             "source_endpoint": record.source_endpoint,
             "source_timestamp": record.source_timestamp,
+            "open_usd": record.open_usd,
+            "high_usd": record.high_usd,
+            "low_usd": record.low_usd,
+            "close_usd": record.close_usd,
             "ingested_at_utc": datetime.now(timezone.utc).isoformat(),
         }
 

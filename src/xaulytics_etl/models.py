@@ -13,6 +13,10 @@ class RateRecord:
     unit: str | None
     source_endpoint: str
     source_timestamp: int | None
+    open_usd: float | None = None
+    high_usd: float | None = None
+    low_usd: float | None = None
+    close_usd: float | None = None
 
 
 @dataclass(frozen=True)
