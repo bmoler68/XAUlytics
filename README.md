@@ -32,7 +32,6 @@
 | `src/xaulytics_etl/etl.py` | Orchestration: `daily`, `historical`, `symbols` |
 | `src/xaulytics_etl/cli.py` | `xaulytics-etl` CLI entrypoint |
 | `sql/schema.sql` | Schema **`xaulytics`**, tables, indexes, views (**`security_invoker`** on price/symbol current views), **`service_role`** grants, **`anon` / `authenticated`** read grants for dashboard |
-| `sql/grants_dashboard_anon.sql` | Same **`anon`** read grants in one file (re-run after **`DROP VIEW`** / recreate views) |
 | `dashboard/` | Static UI: `index.html`, `app.js`, `styles.css`; copy **`config.example.js`** → **`config.js`** (gitignored) |
 | `dashboard/serve.py` | Local static HTTP server (`python dashboard/serve.py`) |
 | `.github/workflows/` | Scheduled daily ETL, manual historical, manual CI (`pytest`) |
@@ -50,7 +49,7 @@
 
 2. Copy `.env.example` to `.env` and set secrets (never commit `.env`). Optional: set **`METALPRICEAPI_BASE_CURRENCIES`** (default when unset is **`USD`** only) and **`METALPRICEAPI_ENABLE_OHLC`** (`true`/`false`).
 
-3. In Supabase, run **`sql/schema.sql`** (SQL editor or migration). It creates schema **`xaulytics`**, tables with primary key **`(pricing_date, quote_code, base_currency)`**, indexes, mirror views (`*_current`), **`security_invoker`** on **`metal_prices_current`** and **`metalprice_api_symbols_current`**, grants for **`service_role`**, and read grants for **`anon` / `authenticated`** used by the dashboard. **Project Settings → Data API:** expose schema **`xaulytics`** for REST. On existing databases, you can apply only the dashboard block via **`sql/grants_dashboard_anon.sql`** or re-run grants after recreating views (PostgreSQL drops privileges on replaced view objects).
+3. In Supabase, run **`sql/schema.sql`** (SQL editor or migration). It creates schema **`xaulytics`**, tables with primary key **`(pricing_date, quote_code, base_currency)`**, indexes, mirror views (`*_current`), **`security_invoker`** on **`metal_prices_current`** and **`metalprice_api_symbols_current`**, grants for **`service_role`**, and read grants for **`anon` / `authenticated`** used by the dashboard. **Project Settings → Data API:** expose schema **`xaulytics`** for REST. If you **`DROP` / `CREATE`** a view, PostgreSQL drops privileges on the old object — copy the **`anon` / `authenticated`** **`GRANT`** block from the bottom of **`sql/schema.sql`** into the SQL editor and run it again.
 
 4. Sync the symbol catalog:
 
@@ -173,7 +172,7 @@ Static assets under **`dashboard/`** (open via **`dashboard/serve.py`** or any s
 ### Data expectations
 
 - Enable bid/ask symbols in **`metalprice_api_symbols_v1`** when you want spread rows (e.g. `XAU-BID`, `XAU-ASK`; **`XRH`** often has spot only).
-- **Permissions:** **`sql/schema.sql`** grants **`anon` / `authenticated`** **`USAGE`** on **`xaulytics`** and **`SELECT`** on **`metal_prices_v1`**, **`metal_prices_current`**, **`metalprice_api_symbols_v1`**, and **`metalprice_api_symbols_current`**. Re-run **`sql/grants_dashboard_anon.sql`** after **`DROP VIEW`** / **`CREATE VIEW`** if you see **`permission denied for view …`**. Missing **`USAGE`** on the schema surfaces as **`permission denied for schema xaulytics`**.
+- **Permissions:** **`sql/schema.sql`** grants **`anon` / `authenticated`** **`USAGE`** on **`xaulytics`** and **`SELECT`** on **`metal_prices_v1`**, **`metal_prices_current`**, **`metalprice_api_symbols_v1`**, and **`metalprice_api_symbols_current`**. After **`DROP VIEW`** / **`CREATE VIEW`**, re-run that **`GRANT`** block from **`sql/schema.sql`** if you see **`permission denied for view …`**. Missing **`USAGE`** on the schema surfaces as **`permission denied for schema xaulytics`**.
 - **`pricesRelation`** defaults to **`metal_prices_current`**; if that view is stale, recreate it from **`sql/schema.sql`** or point **`pricesRelation`** at **`metal_prices_v1`** temporarily.
 - **Expose schema:** Supabase **Project Settings → Data API**: include **`xaulytics`** in **exposed schemas** so PostgREST serves the **`xaulytics`** tables/views.
 

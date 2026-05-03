@@ -126,7 +126,7 @@ grant select on table xaulytics.metalprice_api_symbols_current to service_role;
 -- 1) Run this SQL in Supabase (or apply full schema on new projects).
 -- 2) Supabase Dashboard → Settings → Data API → add xaulytics to exposed schemas
 --    so REST requests can use schema xaulytics.
--- 3) After DROP/CREATE on metal_prices_current, re-run grants (see grants_dashboard_anon.sql).
+-- 3) After DROP/CREATE on views, re-run the anon/authenticated GRANT block below (PostgreSQL drops privileges on replaced view objects).
 -- Grants below allow read-only price data only (no catalog / ETL run leakage).
 -- ---------------------------------------------------------------------------
 
