@@ -2,8 +2,8 @@ name: Daily ETL
 
 on:
   schedule:
-    # 00:10 UTC daily (after MetalpriceAPI prior-day data per their 00:05 GMT note).
-    - cron: "10 0 * * *"
+    # 04:00 UTC daily — after MetalpriceAPI prior-day data (from ~00:05 GMT); avoids peak GitHub schedule churn near midnight UTC.
+    - cron: "0 4 * * *"
   workflow_dispatch:
 
 jobs:

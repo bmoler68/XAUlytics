@@ -107,7 +107,7 @@ This project builds the **`currencies`** query parameter from `metalprice_api_sy
 
 ### Daily timing note
 
-MetalpriceAPI describes **prior-day** historical data as available from **00:05 GMT**. The included GitHub Action schedules **daily** around **00:10 UTC** so `/v1/yesterday` is likely populated. Adjust cron if your provider window differs.
+MetalpriceAPI describes **prior-day** historical data as available from **00:05 GMT**. The included GitHub Action schedules **daily** at **`0 4 * * *` = 04:00 UTC** so `/v1/yesterday` is still populated hours later, while avoiding heavier global workflow load around **00:00 UTC**. GitHub `cron` is **UTC-only**. Adjust **`daily-etl.yml`** if your provider window differs.
 
 ## Configuration
 
