@@ -12,8 +12,16 @@
   <body>
     <main class="container">
       <header class="header">
-        <h1>XAUlytics Precious Metals Dashboard</h1>
-        <p id="as-of-label" class="muted">Loading current snapshot...</p>
+        <div class="header-row">
+          <div>
+            <h1>XAUlytics Precious Metals Dashboard</h1>
+            <p id="as-of-label" class="muted">Loading current snapshot...</p>
+          </div>
+          <div class="toolbar">
+            <label class="toolbar-label" for="base-currency-select">Base currency</label>
+            <select id="base-currency-select" aria-label="Base currency for spot prices"></select>
+          </div>
+        </div>
       </header>
 
       <section id="cards" class="cards" aria-label="Precious metal summary cards"></section>
@@ -25,6 +33,21 @@
         </div>
         <div class="chart-wrap">
           <canvas id="trend-chart" aria-label="Price trend chart"></canvas>
+        </div>
+        <div class="performance-wrap">
+          <h3 id="performance-heading" class="performance-title">Performance</h3>
+          <p id="performance-caption" class="muted performance-caption"></p>
+          <div class="table-wrap performance-table-wrap">
+            <table aria-label="Spot performance by period">
+              <thead>
+                <tr>
+                  <th>Period</th>
+                  <th>Return</th>
+                </tr>
+              </thead>
+              <tbody id="performance-tbody"></tbody>
+            </table>
+          </div>
         </div>
         <div class="table-wrap">
           <table>

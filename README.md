@@ -146,6 +146,7 @@ Views **`metal_prices_current`**, **`etl_runs_current`**, **`metalprice_api_symb
 
 Static assets under **`dashboard/`** (open via **`dashboard/serve.py`** or any static host). The UI uses the Supabase JS client with your **publishable / anon** key; it **does not** call MetalpriceAPI. The page includes required MetalpriceAPI **attribution** for derived data.
 
+- **Base currency** dropdown (`baseCurrencies` in config); reloads cards and charts from **`metal_prices_*`** for the selected **`base_currency`**
 - Cards for configurable **`preciousMetals`** (default `XAU`, `XAG`, `XPT`, `XPD`, `XRH`)
 - **`display_name`** from **`metalprice_api_symbols_current`** when the catalog has a row (sync with **`xaulytics-etl symbols`**)
 - Latest **spot**, **bid**, **ask**, **spread** for the **same `pricing_date`** on all cards (bid/ask need enabled symbols such as `XAU-BID` / `XAU-ASK`)
@@ -160,7 +161,7 @@ Static assets under **`dashboard/`** (open via **`dashboard/serve.py`** or any s
    - **`supabaseAnonKey`** (publishable / anon only — never the service role secret in the browser)
    - **`schema`** (default `xaulytics`)
    - **`baseCurrency`** (default `USD`)
-3. Optional overrides (see **`config.example.js`**): **`pricesRelation`** (default **`metal_prices_current`**), **`symbolsRelation`** (default **`metalprice_api_symbols_current`**), **`preciousMetals`**, **`historyDays`**.
+3. Optional overrides (see **`config.example.js`**): **`pricesRelation`** (default **`metal_prices_current`**), **`symbolsRelation`** (default **`metalprice_api_symbols_current`**), **`baseCurrencies`** (header dropdown; bases must exist in DB from your ETL), **`preciousMetals`**, **`historyDays`**.
 4. From the repo root, run the local static server and open the printed URL:
 
    ```bash

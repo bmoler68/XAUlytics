@@ -31,6 +31,35 @@ body {
   margin: 0 0 0.3rem;
 }
 
+.header-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.toolbar-label {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.toolbar select {
+  background: var(--panel-alt);
+  color: var(--text);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.95rem;
+  min-width: 5.5rem;
+}
+
 .muted {
   color: var(--muted);
 }
@@ -105,6 +134,25 @@ body {
   background: var(--panel-alt);
   border-radius: 10px;
   padding: 0.7rem;
+}
+
+.performance-wrap {
+  margin-top: 1rem;
+}
+
+.performance-title {
+  font-size: 1.05rem;
+  margin: 0 0 0.25rem;
+}
+
+.performance-caption {
+  font-size: 0.8rem;
+  margin: 0 0 0.5rem;
+  line-height: 1.35;
+}
+
+.performance-table-wrap {
+  margin-top: 0.35rem;
 }
 
 .table-wrap {

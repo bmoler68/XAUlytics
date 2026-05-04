@@ -6,7 +6,25 @@
     return;
   }
 
-  const baseCurrency = (config.baseCurrency || "USD").toUpperCase();
+  const SESSION_KEY = "xaulytics_base_currency";
+
+  const baseOptions = Array.isArray(config.baseCurrencies) && config.baseCurrencies.length
+    ? [...new Set(config.baseCurrencies.map((c) => String(c).trim().toUpperCase()).filter(Boolean))]
+    : ["USD", "CAD", "AUD", "EUR", "GBP"];
+
+  let currentBaseCurrency = (config.baseCurrency || baseOptions[0] || "USD").toUpperCase();
+  if (!baseOptions.includes(currentBaseCurrency)) {
+    currentBaseCurrency = baseOptions[0];
+  }
+  try {
+    const stored = sessionStorage.getItem(SESSION_KEY);
+    if (stored && baseOptions.includes(stored)) {
+      currentBaseCurrency = stored;
+    }
+  } catch {
+    /* ignore private mode */
+  }
+
   const metals = Array.isArray(config.preciousMetals) ? config.preciousMetals : ["XAU", "XAG", "XPT", "XPD", "XRH"];
   const historyDays = Number(config.historyDays || 120);
   const supabase = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, {
@@ -21,6 +39,8 @@
   /** @type {Record<string, string>} */
   let symbolLabels = {};
 
+  let currencySelectBound = false;
+
   function escapeHtml(text) {
     if (text == null || text === "") return "";
     return String(text)
@@ -28,6 +48,126 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
+  }
+
+  function isoAddDays(iso, days) {
+    const d = new Date(`${iso}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function isoSubtractMonths(iso, months) {
+    const d = new Date(`${iso}T12:00:00Z`);
+    d.setUTCMonth(d.getUTCMonth() - months);
+    return d.toISOString().slice(0, 10);
+  }
+
+  /** seriesAsc sorted by pricing_date ascending */
+  function findSpotOnOrBefore(seriesAsc, targetIso) {
+    let price = null;
+    for (let i = seriesAsc.length - 1; i >= 0; i--) {
+      if (seriesAsc[i].pricing_date <= targetIso) {
+        price = Number(seriesAsc[i].price_base);
+        break;
+      }
+    }
+    return price;
+  }
+
+  function pctReturn(fromPrice, toPrice) {
+    if (fromPrice == null || toPrice == null || Number.isNaN(fromPrice) || Number.isNaN(toPrice) || fromPrice === 0) {
+      return null;
+    }
+    return ((toPrice / fromPrice) - 1) * 100;
+  }
+
+  async function fetchSpotSeriesAscending(metal) {
+    const { data, error } = await supabase
+      .from(pricesRelation)
+      .select("pricing_date,price_base")
+      .eq("base_currency", currentBaseCurrency)
+      .eq("quote_code", metal)
+      .order("pricing_date", { ascending: true });
+    if (error) throw error;
+    return data || [];
+  }
+
+  function buildPerformancePeriods(seriesAsc) {
+    const empty = [
+      { label: "Today", pct: null },
+      { label: "30 days", pct: null },
+      { label: "6 months", pct: null },
+      { label: "1 year", pct: null },
+      { label: "5 years", pct: null },
+    ];
+    if (!seriesAsc.length) return empty;
+
+    const last = seriesAsc[seriesAsc.length - 1];
+    const latestDate = last.pricing_date;
+    const latestPx = Number(last.price_base);
+    const prevRow = seriesAsc.length >= 2 ? seriesAsc[seriesAsc.length - 2] : null;
+    const todayPct = prevRow ? pctReturn(Number(prevRow.price_base), latestPx) : null;
+
+    const t30 = isoAddDays(latestDate, -30);
+    const t6m = isoSubtractMonths(latestDate, 6);
+    const t1y = isoSubtractMonths(latestDate, 12);
+    const t5y = isoSubtractMonths(latestDate, 60);
+
+    return [
+      { label: "Today", pct: todayPct },
+      { label: "30 days", pct: pctReturn(findSpotOnOrBefore(seriesAsc, t30), latestPx) },
+      { label: "6 months", pct: pctReturn(findSpotOnOrBefore(seriesAsc, t6m), latestPx) },
+      { label: "1 year", pct: pctReturn(findSpotOnOrBefore(seriesAsc, t1y), latestPx) },
+      { label: "5 years", pct: pctReturn(findSpotOnOrBefore(seriesAsc, t5y), latestPx) },
+    ];
+  }
+
+  function renderPerformanceTable(periodRows, metal) {
+    const tbody = document.getElementById("performance-tbody");
+    const cap = document.getElementById("performance-caption");
+    const head = document.getElementById("performance-heading");
+    if (!tbody || !cap || !head) return;
+    const display = symbolLabels[metal];
+    head.textContent = display
+      ? `Spot performance (${display}, ${metal}, ${currentBaseCurrency})`
+      : `Spot performance (${metal}, ${currentBaseCurrency})`;
+    const intro = display
+      ? `${display} (${metal}). `
+      : "";
+    cap.textContent =
+      intro +
+      "Today compares the latest published day to the prior published day. Other rows use the latest spot vs the last available price on or before the calendar lookback (30 days; 6, 12, and 60 months). Long horizons need enough daily history in the database.";
+    tbody.innerHTML = periodRows
+      .map((r) => {
+        const cls =
+          r.pct == null || Number.isNaN(r.pct) ? "" : r.pct >= 0 ? "change-positive" : "change-negative";
+        const cell = r.pct == null || Number.isNaN(r.pct) ? "N/A" : pct(r.pct);
+        return `<tr><td>${escapeHtml(r.label)}</td><td class="${cls}">${cell}</td></tr>`;
+      })
+      .join("");
+  }
+
+  function setupBaseCurrencySelect() {
+    const sel = document.getElementById("base-currency-select");
+    if (!sel) return;
+
+    sel.innerHTML = baseOptions.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+    sel.value = currentBaseCurrency;
+
+    if (!currencySelectBound) {
+      currencySelectBound = true;
+      sel.addEventListener("change", () => {
+        currentBaseCurrency = sel.value;
+        try {
+          sessionStorage.setItem(SESSION_KEY, currentBaseCurrency);
+        } catch {
+          /* ignore */
+        }
+        loadDashboardData().catch(showError);
+      });
+    } else {
+      sel.value = currentBaseCurrency;
+    }
   }
 
   async function fetchSymbolLabels() {
@@ -75,12 +215,14 @@
     const { data, error } = await supabase
       .from(pricesRelation)
       .select("pricing_date")
-      .eq("base_currency", baseCurrency)
+      .eq("base_currency", currentBaseCurrency)
       .eq("quote_code", metals[0])
       .order("pricing_date", { ascending: false })
       .limit(1);
     if (error) throw error;
-    if (!data || data.length === 0) throw new Error("No market data rows found.");
+    if (!data || data.length === 0) {
+      throw new Error(`No market data for base currency ${currentBaseCurrency}. Run ETL for this base or choose another.`);
+    }
     return data[0].pricing_date;
   }
 
@@ -88,7 +230,7 @@
     const { data, error } = await supabase
       .from(pricesRelation)
       .select("pricing_date")
-      .eq("base_currency", baseCurrency)
+      .eq("base_currency", currentBaseCurrency)
       .eq("quote_code", metals[0])
       .lt("pricing_date", latestDate)
       .order("pricing_date", { ascending: false })
@@ -106,7 +248,7 @@
     const { data, error } = await supabase
       .from(pricesRelation)
       .select("pricing_date,quote_code,base_currency,price_base")
-      .eq("base_currency", baseCurrency)
+      .eq("base_currency", currentBaseCurrency)
       .eq("pricing_date", pricingDate)
       .in("quote_code", quoteCodes);
     if (error) throw error;
@@ -133,7 +275,7 @@
   function renderCards(latestDate, latestSnap, priorSnap) {
     const cardsEl = document.getElementById("cards");
     cardsEl.innerHTML = "";
-    document.getElementById("as-of-label").textContent = `As of ${latestDate} (${baseCurrency})`;
+    document.getElementById("as-of-label").textContent = `As of ${latestDate} 23:59:59 GMT (${currentBaseCurrency})`;
 
     for (const metal of metals) {
       const now = latestSnap[metal] || {};
@@ -151,7 +293,7 @@
       card.innerHTML = `
         <h3>${metal}</h3>
         ${displayLine}
-        <div class="spot">${fmt(now.spot, 2)} ${baseCurrency}</div>
+        <div class="spot">${fmt(now.spot, 2)} ${currentBaseCurrency}</div>
         <div class="metric-row"><span>Bid</span><span>${fmt(now.bid, 2)}</span></div>
         <div class="metric-row"><span>Ask</span><span>${fmt(now.ask, 2)}</span></div>
         <div class="metric-row"><span>Spread</span><span>${fmt(now.spread, 4)}</span></div>
@@ -170,17 +312,27 @@
   async function loadDetail(metal) {
     const label = symbolLabels[metal];
     document.getElementById("detail-title").textContent = label ? `${label} (${metal})` : `${metal} Trend`;
-    document.getElementById("detail-subtitle").textContent = `${baseCurrency} spot, bid, ask, and spread history`;
+    document.getElementById("detail-subtitle").textContent = `${currentBaseCurrency} spot, bid, ask, and spread history`;
 
     const codes = [metal, `${metal}-BID`, `${metal}-ASK`];
-    const { data, error } = await supabase
-      .from(pricesRelation)
-      .select("pricing_date,quote_code,price_base")
-      .eq("base_currency", baseCurrency)
-      .in("quote_code", codes)
-      .order("pricing_date", { ascending: false })
-      .limit(historyDays * 3);
+    const [histResult, spotSeries] = await Promise.all([
+      supabase
+        .from(pricesRelation)
+        .select("pricing_date,quote_code,price_base")
+        .eq("base_currency", currentBaseCurrency)
+        .in("quote_code", codes)
+        .order("pricing_date", { ascending: false })
+        .limit(historyDays * 3),
+      fetchSpotSeriesAscending(metal).catch((e) => {
+        console.warn("Spot series for performance table:", e);
+        return [];
+      }),
+    ]);
+    const { data, error } = histResult;
     if (error) throw error;
+
+    const periodRows = buildPerformancePeriods(spotSeries);
+    renderPerformanceTable(periodRows, metal);
 
     const byDate = new Map();
     for (const row of data || []) {
@@ -198,9 +350,10 @@
       .map((r, idx, arr) => {
         const prior = idx > 0 ? arr[idx - 1] : null;
         const spread = r.bid != null && r.ask != null ? r.ask - r.bid : null;
-        const delta = prior && r.spot != null && prior.spot != null && prior.spot !== 0
-          ? { amount: r.spot - prior.spot, percent: ((r.spot - prior.spot) / prior.spot) * 100 }
-          : { amount: null, percent: null };
+        const delta =
+          prior && r.spot != null && prior.spot != null && prior.spot !== 0
+            ? { amount: r.spot - prior.spot, percent: ((r.spot - prior.spot) / prior.spot) * 100 }
+            : { amount: null, percent: null };
         return { ...r, spread, deltaAmount: delta.amount, deltaPercent: delta.percent };
       });
 
@@ -220,7 +373,7 @@
         labels,
         datasets: [
           {
-            label: `${metal} Spot (${baseCurrency})`,
+            label: `${metal} Spot (${currentBaseCurrency})`,
             data: spotData,
             borderColor: "#f59e0b",
             tension: 0.2,
@@ -269,11 +422,10 @@
   function showError(err) {
     const message = err && err.message ? err.message : String(err);
     const cards = document.getElementById("cards");
-    cards.innerHTML = `<article class="card">Error loading dashboard data: ${message}</article>`;
+    cards.innerHTML = `<article class="card">Error loading dashboard data: ${escapeHtml(message)}</article>`;
   }
 
-  async function boot() {
-    symbolLabels = await fetchSymbolLabels();
+  async function loadDashboardData() {
     const latestDate = await fetchLatestPricingDate();
     const priorDate = await fetchPreviousPricingDate(latestDate);
     const [latestRows, priorRows] = await Promise.all([fetchRowsByDate(latestDate), fetchRowsByDate(priorDate)]);
@@ -281,6 +433,12 @@
     const priorSnap = rowsToSnapshot(priorRows);
     renderCards(latestDate, latestSnap, priorSnap);
     await loadDetail(selectedMetal);
+  }
+
+  async function boot() {
+    setupBaseCurrencySelect();
+    symbolLabels = await fetchSymbolLabels();
+    await loadDashboardData();
   }
 
   boot().catch(showError);
