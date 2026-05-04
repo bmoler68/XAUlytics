@@ -9,6 +9,7 @@
 - **API-conscious design**: builds explicit `currencies=` lists from the symbol catalog (`enabled_for_pricing`) so requests stay predictable and minimal.
 - **Multi-base spot loads**: `METALPRICEAPI_BASE_CURRENCIES` drives one MetalpriceAPI spot request per base (`/v1/yesterday`, `/v1/{date}`, `/v1/timeframe`). Optional **`METALPRICEAPI_ENABLE_OHLC`** adds **`GET /v1/ohlc`** per stored row (pair uses that row’s `base_currency`).
 - **Bid/ask style symbols**: when enabled in the catalog (e.g. `XAU-BID`, `XAU-ASK`), they load like other quotes and can appear in the dashboard cards alongside spot.
+- **Read-only dashboard**: static HTML/JS over **Supabase `anon` + RLS**; no API keys in the browser except the publishable key. Spot **performance** uses calendar-anchored returns (exact `pricing_date` matches) and extra queries for anchor dates so long lookbacks are not cut off by PostgREST row limits.
 - **Automation-friendly**: Dockerfile for Linux-style runs; workflows for scheduled daily loads and optional manual historical backfills; optional local dashboard via `dashboard/serve.py`.
 
 ## Requirements
@@ -32,7 +33,7 @@
 | `src/xaulytics_etl/etl.py` | Orchestration: `daily`, `historical`, `symbols` |
 | `src/xaulytics_etl/cli.py` | `xaulytics-etl` CLI entrypoint |
 | `sql/schema.sql` | Schema **`xaulytics`**, tables, indexes, views (**`security_invoker`** on price/symbol current views), **`service_role`** grants, **`anon` / `authenticated`** read grants for dashboard |
-| `dashboard/` | Static UI: `index.html`, `app.js`, `styles.css`; copy **`config.example.js`** → **`config.js`** (gitignored) |
+| `dashboard/` | Static UI: `index.html`, `app.js`, `styles.css` (Chart.js + Supabase JS from CDN); copy **`config.example.js`** → **`config.js`** (gitignored) |
 | `dashboard/serve.py` | Local static HTTP server (`python dashboard/serve.py`) |
 | `.github/workflows/` | Scheduled daily ETL, manual historical, manual CI (`pytest`) |
 
@@ -147,11 +148,26 @@ Views **`metal_prices_current`**, **`etl_runs_current`**, **`metalprice_api_symb
 Static assets under **`dashboard/`** (open via **`dashboard/serve.py`** or any static host). The UI uses the Supabase JS client with your **publishable / anon** key; it **does not** call MetalpriceAPI. The page includes required MetalpriceAPI **attribution** for derived data.
 
 - **Base currency** dropdown (`baseCurrencies` in config); reloads cards and charts from **`metal_prices_*`** for the selected **`base_currency`**
-- Cards for configurable **`preciousMetals`** (default `XAU`, `XAG`, `XPT`, `XPD`, `XRH`)
+- Cards for configurable **`preciousMetals`** (default `XAU`, `XAG`, `XPT`, `XPD`, `XRH`). Quote codes are normalized from config (invalid entries are dropped).
 - **`display_name`** from **`metalprice_api_symbols_current`** when the catalog has a row (sync with **`xaulytics-etl symbols`**)
 - Latest **spot**, **bid**, **ask**, **spread** for the **same `pricing_date`** on all cards (bid/ask need enabled symbols such as `XAU-BID` / `XAU-ASK`)
 - **Spot change** vs the previous **`pricing_date`** returned for the **first** symbol in **`preciousMetals`** (default **`XAU`**): latest and prior dates are shared across cards for that comparison
 - Click a card for trend chart + recent history table (history table **Δ** compares each date to the chronologically previous date **that has data** for that metal)
+
+### Spot performance table
+
+Shown for the selected metal. Uses **spot** rows only (same **`quote_code`** as the metal; bid/ask rows are not mixed into these returns).
+
+| Row | Meaning |
+|-----|---------|
+| **Today** | Latest spot in the loaded series vs the prior calendar row in that series (last vs second-to-last **`pricing_date`** for spot). |
+| **YTD** | Spot on **January 1** of the **same calendar year as the latest spot date**, vs latest — **exact date match only** (no nearest-day fallback). |
+| **1 month / 6 months** | Spot on the **same calendar day** one month or six months earlier (UTC `Date` math), vs latest — exact **`pricing_date`** match only. |
+| **1 year / 5 years** | Spot on the **same calendar day** one or five **calendar years** earlier (UTC), vs latest — exact match only. |
+
+If the anchor calendar day has no spot row for that metal and base, the cell shows **N/A**. Because PostgREST responses are often capped (commonly **~1000 rows** per request unless raised in Supabase), the dashboard loads **rolling recent spot rows** for the “Today” chain **and** runs a **second query** that fetches those **exact anchor dates** by `pricing_date`, so long horizons (e.g. five years back) still resolve when the data exists in the database.
+
+Optional **`performanceSpotRowLimit`** in **`dashboard/config.js`** caps how many recent spot rows are requested for the rolling series (default **5000** in **`config.example.js`**); it does **not** replace the anchor-date query above.
 
 ### Dashboard setup
 
@@ -161,7 +177,9 @@ Static assets under **`dashboard/`** (open via **`dashboard/serve.py`** or any s
    - **`supabaseAnonKey`** (publishable / anon only — never the service role secret in the browser)
    - **`schema`** (default `xaulytics`)
    - **`baseCurrency`** (default `USD`)
-3. Optional overrides (see **`config.example.js`**): **`pricesRelation`** (default **`metal_prices_current`**), **`symbolsRelation`** (default **`metalprice_api_symbols_current`**), **`baseCurrencies`** (header dropdown; bases must exist in DB from your ETL), **`preciousMetals`**, **`historyDays`**.
+3. Optional overrides (see **`config.example.js`**): **`pricesRelation`** (default **`metal_prices_current`**), **`symbolsRelation`** (default **`metalprice_api_symbols_current`**), **`baseCurrencies`** (header dropdown; bases must exist in DB from your ETL), **`preciousMetals`**, **`historyDays`**, **`performanceSpotRowLimit`** (max recent spot rows for the performance table rolling fetch; default **5000**).
+
+   Invalid **`supabaseUrl`** / placeholder anon keys are rejected at startup (HTTPS required except **localhost** / **127.0.0.1** / **`[::1]`**). **`schema`** and relation names must be plain Postgres identifiers (letters, digits, underscore).
 4. From the repo root, run the local static server and open the printed URL:
 
    ```bash
@@ -191,7 +209,7 @@ docker run --rm --env-file .env xaulytics-etl:latest symbols
 | Workflow | Purpose |
 |----------|---------|
 | `daily-etl.yml` | Cron schedule + **workflow_dispatch**: `symbols` then `daily` |
-| `historical-etl.yml` | Manual: inputs `start_date` / `end_date`, then `symbols` + `historical` |
+| `historical-etl.yml` | Manual: inputs `start_date` / `end_date` (`YYYY-MM-DD`), validates ISO dates, then `symbols` + `historical` |
 | `ci.yml` | Manual `pytest` (Python 3.12) |
 
 **Secrets** (GitHub **Settings → Secrets and variables**): `METALPRICEAPI_API_KEY`, `METALPRICEAPI_BASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.

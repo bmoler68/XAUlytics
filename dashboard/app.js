@@ -6,6 +6,51 @@
     return;
   }
 
+  function assertSupabaseConfig(cfg) {
+    const urlStr = String(cfg.supabaseUrl || "").trim();
+    let u;
+    try {
+      u = new URL(urlStr);
+    } catch {
+      throw new Error("supabaseUrl must be a valid URL");
+    }
+    const local =
+      u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]";
+    if (u.protocol === "http:" && !local) {
+      throw new Error("supabaseUrl must use https:// unless it targets localhost");
+    }
+    if (u.protocol !== "http:" && u.protocol !== "https:") {
+      throw new Error("supabaseUrl must use http: or https:");
+    }
+    const key = String(cfg.supabaseAnonKey || "").trim();
+    if (key.length < 30) {
+      throw new Error("supabaseAnonKey is missing or too short (use the project anon key from Supabase)");
+    }
+  }
+
+  function escapeHtml(text) {
+    if (text == null || text === "") return "";
+    return String(text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  try {
+    assertSupabaseConfig(config);
+  } catch (e) {
+    const msg = e && e.message ? e.message : "Invalid dashboard configuration.";
+    document.body.innerHTML = `<main style='padding:1rem;font-family:Segoe UI,Arial,sans-serif;'>${escapeHtml(msg)}</main>`;
+    return;
+  }
+
+  /** Postgres identifiers only (schema / relation names). */
+  function sanitizeDbIdentifier(id, fallback) {
+    const s = String(id ?? "").trim();
+    return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(s) ? s : fallback;
+  }
+
   const SESSION_KEY = "xaulytics_base_currency";
 
   const baseOptions = Array.isArray(config.baseCurrencies) && config.baseCurrencies.length
@@ -25,14 +70,36 @@
     /* ignore private mode */
   }
 
-  const metals = Array.isArray(config.preciousMetals) ? config.preciousMetals : ["XAU", "XAG", "XPT", "XPD", "XRH"];
+  const DEFAULT_METALS = ["XAU", "XAG", "XPT", "XPD", "XRH"];
+  const metalsRaw = Array.isArray(config.preciousMetals) ? config.preciousMetals : DEFAULT_METALS;
+  const metals = (() => {
+    const cleaned = [
+      ...new Set(
+        metalsRaw
+          .map((m) => String(m).trim().toUpperCase())
+          .filter((m) => /^[A-Z][A-Z0-9]{1,11}$/.test(m))
+      ),
+    ];
+    return cleaned.length ? cleaned : DEFAULT_METALS;
+  })();
+
   const historyDays = Number(config.historyDays || 120);
+  const dbSchema = sanitizeDbIdentifier(config.schema, "xaulytics");
   const supabase = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, {
-    db: { schema: config.schema || "xaulytics" },
+    db: { schema: dbSchema },
   });
 
-  const pricesRelation = config.pricesRelation || "metal_prices_current";
-  const symbolsRelation = config.symbolsRelation || "metalprice_api_symbols_current";
+  const pricesRelation = sanitizeDbIdentifier(config.pricesRelation, "metal_prices_current");
+  const symbolsRelation = sanitizeDbIdentifier(config.symbolsRelation, "metalprice_api_symbols_current");
+
+  /**
+   * PostgREST caps unbounded selects (commonly 1000 rows). Ascending order without a limit
+   * returns the oldest slice only, so "latest" was not today — performance Today was wrong.
+   */
+  const PERFORMANCE_SPOT_ROW_LIMIT = Math.min(
+    Math.max(Number(config.performanceSpotRowLimit) || 5000, 500),
+    50000
+  );
 
   let selectedMetal = metals[0];
   let trendChart = null;
@@ -41,19 +108,14 @@
 
   let currencySelectBound = false;
 
-  function escapeHtml(text) {
-    if (text == null || text === "") return "";
-    return String(text)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
-  function isoAddDays(iso, days) {
-    const d = new Date(`${iso}T12:00:00Z`);
-    d.setUTCDate(d.getUTCDate() + days);
-    return d.toISOString().slice(0, 10);
+  /** DB/API may return `date` or ISO datetime; string compare must use one shape or anchors break (e.g. 5y → N/A). */
+  function normalizePricingDate(value) {
+    if (value == null || value === "") return "";
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return value.toISOString().slice(0, 10);
+    }
+    const s = String(value);
+    return s.length >= 10 ? s.slice(0, 10) : s;
   }
 
   function isoSubtractMonths(iso, months) {
@@ -62,16 +124,40 @@
     return d.toISOString().slice(0, 10);
   }
 
-  /** seriesAsc sorted by pricing_date ascending */
-  function findSpotOnOrBefore(seriesAsc, targetIso) {
-    let price = null;
-    for (let i = seriesAsc.length - 1; i >= 0; i--) {
-      if (seriesAsc[i].pricing_date <= targetIso) {
-        price = Number(seriesAsc[i].price_base);
-        break;
-      }
+  /** Same calendar day N calendar years earlier (UTC). */
+  function isoSubtractYears(iso, years) {
+    const d = new Date(`${iso}T12:00:00Z`);
+    d.setUTCFullYear(d.getUTCFullYear() - years);
+    return d.toISOString().slice(0, 10);
+  }
+
+  /** Calendar anchor dates for performance (exact-date spot lookups). */
+  function performanceAnchorIsoDates(latestDate) {
+    const y = Number(latestDate.slice(0, 4));
+    return [
+      isoSubtractMonths(latestDate, 1),
+      isoSubtractMonths(latestDate, 6),
+      isoSubtractYears(latestDate, 1),
+      isoSubtractYears(latestDate, 5),
+      `${y}-01-01`,
+    ];
+  }
+
+  /** Map pricing_date (normalized) → spot; deduped series has one row per day. */
+  function spotMapFromSeries(seriesAsc) {
+    const m = new Map();
+    for (const r of seriesAsc) {
+      const d = normalizePricingDate(r.pricing_date);
+      if (!d) continue;
+      m.set(d, Number(r.price_base));
     }
-    return price;
+    return m;
+  }
+
+  function getSpotExact(spotByDate, targetIso) {
+    const k = normalizePricingDate(targetIso);
+    if (!k || !spotByDate.has(k)) return null;
+    return spotByDate.get(k);
   }
 
   function pctReturn(fromPrice, toPrice) {
@@ -81,44 +167,110 @@
     return ((toPrice / fromPrice) - 1) * 100;
   }
 
+  function returnAmount(fromPrice, toPrice) {
+    if (fromPrice == null || toPrice == null || Number.isNaN(fromPrice) || Number.isNaN(toPrice)) {
+      return null;
+    }
+    return toPrice - fromPrice;
+  }
+
+  /** One row per calendar day (last wins). Spot-only series; bid/ask rows are never queried here. */
+  function dedupeSpotRowsByDateAscending(rowsAsc) {
+    const out = [];
+    for (const r of rowsAsc) {
+      const row = { pricing_date: normalizePricingDate(r.pricing_date), price_base: r.price_base };
+      if (!row.pricing_date) continue;
+      if (out.length && out[out.length - 1].pricing_date === row.pricing_date) {
+        out[out.length - 1] = row;
+      } else {
+        out.push(row);
+      }
+    }
+    return out;
+  }
+
   async function fetchSpotSeriesAscending(metal) {
     const { data, error } = await supabase
       .from(pricesRelation)
       .select("pricing_date,price_base")
       .eq("base_currency", currentBaseCurrency)
       .eq("quote_code", metal)
-      .order("pricing_date", { ascending: true });
+      .order("pricing_date", { ascending: false })
+      .limit(PERFORMANCE_SPOT_ROW_LIMIT);
     if (error) throw error;
-    return data || [];
+    const rows = data || [];
+    rows.reverse();
+    return dedupeSpotRowsByDateAscending(rows);
   }
 
-  function buildPerformancePeriods(seriesAsc) {
+  /**
+   * Load spots for exact calendar dates (e.g. 5y anchor). The rolling series fetch is capped
+   * by PostgREST row limits (~1000 default), so dates years ago are often missing from seriesAsc alone.
+   */
+  async function fetchSpotPricesForDates(metal, isoDates) {
+    const unique = [...new Set(isoDates.map((d) => normalizePricingDate(d)).filter(Boolean))];
+    if (!unique.length) return new Map();
+    const { data, error } = await supabase
+      .from(pricesRelation)
+      .select("pricing_date,price_base")
+      .eq("base_currency", currentBaseCurrency)
+      .eq("quote_code", metal)
+      .in("pricing_date", unique);
+    if (error) throw error;
+    const m = new Map();
+    for (const r of data || []) {
+      const d = normalizePricingDate(r.pricing_date);
+      if (d) m.set(d, Number(r.price_base));
+    }
+    return m;
+  }
+
+  function buildPerformancePeriods(seriesAsc, anchorSpots) {
     const empty = [
-      { label: "Today", pct: null },
-      { label: "30 days", pct: null },
-      { label: "6 months", pct: null },
-      { label: "1 year", pct: null },
-      { label: "5 years", pct: null },
+      { label: "Today", amount: null, pct: null },
+      { label: "YTD", amount: null, pct: null },
+      { label: "1 month", amount: null, pct: null },
+      { label: "6 months", amount: null, pct: null },
+      { label: "1 year", amount: null, pct: null },
+      { label: "5 years", amount: null, pct: null },
     ];
     if (!seriesAsc.length) return empty;
 
     const last = seriesAsc[seriesAsc.length - 1];
-    const latestDate = last.pricing_date;
+    const latestDate = normalizePricingDate(last.pricing_date);
     const latestPx = Number(last.price_base);
     const prevRow = seriesAsc.length >= 2 ? seriesAsc[seriesAsc.length - 2] : null;
-    const todayPct = prevRow ? pctReturn(Number(prevRow.price_base), latestPx) : null;
+    const prevPx = prevRow ? Number(prevRow.price_base) : null;
+    const todayPct = prevRow ? pctReturn(prevPx, latestPx) : null;
+    const todayAmt = prevRow ? returnAmount(prevPx, latestPx) : null;
 
-    const t30 = isoAddDays(latestDate, -30);
+    const t1m = isoSubtractMonths(latestDate, 1);
     const t6m = isoSubtractMonths(latestDate, 6);
-    const t1y = isoSubtractMonths(latestDate, 12);
-    const t5y = isoSubtractMonths(latestDate, 60);
+    const t1y = isoSubtractYears(latestDate, 1);
+    const t5y = isoSubtractYears(latestDate, 5);
+
+    const spotByDate = spotMapFromSeries(seriesAsc);
+    if (anchorSpots && anchorSpots.size) {
+      for (const [k, v] of anchorSpots) {
+        spotByDate.set(k, v);
+      }
+    }
+    const p1m = getSpotExact(spotByDate, t1m);
+    const p6m = getSpotExact(spotByDate, t6m);
+    const p1y = getSpotExact(spotByDate, t1y);
+    const p5y = getSpotExact(spotByDate, t5y);
+
+    const dataYear = Number(latestDate.slice(0, 4));
+    const ytdStartIso = `${dataYear}-01-01`;
+    const pYtd = getSpotExact(spotByDate, ytdStartIso);
 
     return [
-      { label: "Today", pct: todayPct },
-      { label: "30 days", pct: pctReturn(findSpotOnOrBefore(seriesAsc, t30), latestPx) },
-      { label: "6 months", pct: pctReturn(findSpotOnOrBefore(seriesAsc, t6m), latestPx) },
-      { label: "1 year", pct: pctReturn(findSpotOnOrBefore(seriesAsc, t1y), latestPx) },
-      { label: "5 years", pct: pctReturn(findSpotOnOrBefore(seriesAsc, t5y), latestPx) },
+      { label: "Today", amount: todayAmt, pct: todayPct },
+      { label: "YTD", amount: returnAmount(pYtd, latestPx), pct: pctReturn(pYtd, latestPx) },
+      { label: "1 month", amount: returnAmount(p1m, latestPx), pct: pctReturn(p1m, latestPx) },
+      { label: "6 months", amount: returnAmount(p6m, latestPx), pct: pctReturn(p6m, latestPx) },
+      { label: "1 year", amount: returnAmount(p1y, latestPx), pct: pctReturn(p1y, latestPx) },
+      { label: "5 years", amount: returnAmount(p5y, latestPx), pct: pctReturn(p5y, latestPx) },
     ];
   }
 
@@ -136,13 +288,23 @@
       : "";
     cap.textContent =
       intro +
-      "Today compares the latest published day to the prior published day. Other rows use the latest spot vs the last available price on or before the calendar lookback (30 days; 6, 12, and 60 months). Long horizons need enough daily history in the database.";
+      `Uses spot rows only (quote code ${metal}); missing bid/ask on some days does not affect these returns. Today compares the latest published day to the prior published day. Each other period uses the spot on the exact same calendar day in the prior month, six months earlier, one calendar year earlier, or five calendar years earlier (UTC), compared to the latest day—no nearest-day fallback. Anchor dates are loaded directly from the database so long horizons are not limited by the recent-rows window. YTD uses the spot on January 1 of the data year only when that exact date exists. Missing anchor dates show N/A.`;
     tbody.innerHTML = periodRows
       .map((r) => {
         const cls =
           r.pct == null || Number.isNaN(r.pct) ? "" : r.pct >= 0 ? "change-positive" : "change-negative";
-        const cell = r.pct == null || Number.isNaN(r.pct) ? "N/A" : pct(r.pct);
-        return `<tr><td>${escapeHtml(r.label)}</td><td class="${cls}">${cell}</td></tr>`;
+        let cell;
+        if (
+          r.pct == null ||
+          Number.isNaN(r.pct) ||
+          r.amount == null ||
+          Number.isNaN(r.amount)
+        ) {
+          cell = "N/A";
+        } else {
+          cell = `${signed(r.amount, 2)} ${currentBaseCurrency} (${pct(r.pct)})`;
+        }
+        return `<tr><td>${escapeHtml(r.label)}</td><td class="${cls}">${escapeHtml(cell)}</td></tr>`;
       })
       .join("");
   }
@@ -331,12 +493,24 @@
     const { data, error } = histResult;
     if (error) throw error;
 
-    const periodRows = buildPerformancePeriods(spotSeries);
+    const lastSpot = spotSeries.length ? spotSeries[spotSeries.length - 1] : null;
+    const latestSpotDate = lastSpot ? normalizePricingDate(lastSpot.pricing_date) : "";
+    let anchorSpots = new Map();
+    if (latestSpotDate) {
+      try {
+        anchorSpots = await fetchSpotPricesForDates(metal, performanceAnchorIsoDates(latestSpotDate));
+      } catch (e) {
+        console.warn("Performance anchor spots:", e);
+      }
+    }
+
+    const periodRows = buildPerformancePeriods(spotSeries, anchorSpots);
     renderPerformanceTable(periodRows, metal);
 
     const byDate = new Map();
     for (const row of data || []) {
-      const date = row.pricing_date;
+      const date = normalizePricingDate(row.pricing_date);
+      if (!date) continue;
       if (!byDate.has(date)) byDate.set(date, { date, spot: null, bid: null, ask: null });
       const item = byDate.get(date);
       if (row.quote_code === metal) item.spot = Number(row.price_base);
@@ -362,10 +536,11 @@
   }
 
   function renderTrendChart(rows, metal) {
+    const ctx = document.getElementById("trend-chart");
+    if (!ctx) return;
     const labels = rows.map((r) => r.date);
     const spotData = rows.map((r) => r.spot);
     const spreadData = rows.map((r) => r.spread);
-    const ctx = document.getElementById("trend-chart");
     if (trendChart) trendChart.destroy();
     trendChart = new Chart(ctx, {
       type: "line",
@@ -406,7 +581,7 @@
       .map(
         (r) => `
         <tr>
-          <td>${r.date}</td>
+          <td>${escapeHtml(r.date)}</td>
           <td>${fmt(r.spot, 2)}</td>
           <td>${fmt(r.bid, 2)}</td>
           <td>${fmt(r.ask, 2)}</td>
@@ -422,6 +597,7 @@
   function showError(err) {
     const message = err && err.message ? err.message : String(err);
     const cards = document.getElementById("cards");
+    if (!cards) return;
     cards.innerHTML = `<article class="card">Error loading dashboard data: ${escapeHtml(message)}</article>`;
   }
 
