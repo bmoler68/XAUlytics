@@ -542,6 +542,8 @@
     const spotData = rows.map((r) => r.spot);
     const spreadData = rows.map((r) => r.spread);
     if (trendChart) trendChart.destroy();
+    const narrow = window.matchMedia("(max-width: 640px)").matches;
+    const tickSize = narrow ? 9 : 11;
     trendChart = new Chart(ctx, {
       type: "line",
       data: {
@@ -565,10 +567,38 @@
       },
       options: {
         responsive: true,
-        maintainAspectRatio: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            labels: {
+              boxWidth: narrow ? 12 : 40,
+              padding: narrow ? 8 : 12,
+              font: { size: narrow ? 10 : 12 },
+            },
+          },
+        },
         scales: {
-          y: { type: "linear", position: "left" },
-          y1: { type: "linear", position: "right", grid: { drawOnChartArea: false } },
+          x: {
+            ticks: {
+              maxRotation: narrow ? 50 : 0,
+              minRotation: narrow ? 40 : 0,
+              autoSkip: true,
+              maxTicksLimit: narrow ? 8 : 12,
+              font: { size: tickSize },
+            },
+          },
+          y: {
+            type: "linear",
+            position: "left",
+            ticks: { font: { size: tickSize } },
+          },
+          y1: {
+            type: "linear",
+            position: "right",
+            grid: { drawOnChartArea: false },
+            ticks: { font: { size: tickSize } },
+          },
         },
       },
     });

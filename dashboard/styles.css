@@ -24,11 +24,14 @@ body {
 .container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 1.2rem;
+  padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px))
+    max(1.25rem, env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
 }
 
 .header h1 {
   margin: 0 0 0.3rem;
+  font-size: clamp(1.15rem, 4vw + 0.5rem, 1.75rem);
+  line-height: 1.2;
 }
 
 .header-row {
@@ -55,9 +58,11 @@ body {
   color: var(--text);
   border: 1px solid #334155;
   border-radius: 8px;
-  padding: 0.35rem 0.6rem;
+  padding: 0.45rem 0.65rem;
   font-size: 0.95rem;
   min-width: 5.5rem;
+  min-height: 44px;
+  touch-action: manipulation;
 }
 
 .muted {
@@ -66,7 +71,7 @@ body {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
   gap: 0.75rem;
   margin: 1rem 0 1.25rem;
 }
@@ -77,6 +82,9 @@ body {
   border-radius: 12px;
   padding: 0.9rem;
   cursor: pointer;
+  min-height: 44px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(245, 158, 11, 0.15);
 }
 
 .card.selected {
@@ -134,6 +142,15 @@ body {
   background: var(--panel-alt);
   border-radius: 10px;
   padding: 0.7rem;
+  position: relative;
+  width: 100%;
+  height: clamp(220px, 42vmin, 360px);
+  min-height: 200px;
+}
+
+.chart-wrap canvas {
+  display: block;
+  max-width: 100%;
 }
 
 .performance-wrap {
@@ -158,6 +175,19 @@ body {
 .table-wrap {
   margin-top: 1rem;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
+}
+
+/* History table (direct child of detail): sticky date column when scrolling horizontally */
+section.detail > .table-wrap table th:first-child,
+section.detail > .table-wrap table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--panel);
+  box-shadow: 4px 0 8px -2px rgba(0, 0, 0, 0.35);
 }
 
 table {
@@ -186,4 +216,60 @@ td:first-child {
 
 a {
   color: #93c5fd;
+}
+
+/* --- Responsive layout -------------------------------------------------- */
+
+@media (max-width: 640px) {
+  .header-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbar {
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+  }
+
+  .toolbar select {
+    flex: 1;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .cards {
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+  }
+
+  .detail {
+    padding: 0.85rem;
+  }
+
+  .detail-header h2 {
+    font-size: clamp(1rem, 4vw, 1.25rem);
+  }
+
+  .chart-wrap {
+    padding: 0.5rem;
+    height: clamp(200px, 48vmin, 300px);
+  }
+
+  th,
+  td {
+    padding: 0.4rem 0.28rem;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  .performance-caption {
+    font-size: 0.75rem;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 900px) {
+  .cards {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  }
 }
