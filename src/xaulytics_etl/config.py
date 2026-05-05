@@ -42,7 +42,7 @@ def load_settings() -> Settings:
     return Settings(
         metalpriceapi_api_key=_required_env("METALPRICEAPI_API_KEY"),
         metalpriceapi_base_url=os.getenv("METALPRICEAPI_BASE_URL", "https://api.metalpriceapi.com"),
-        metalpriceapi_enable_ohlc=_env_bool("METALPRICEAPI_ENABLE_OHLC", default=True),
+        metalpriceapi_enable_ohlc=_env_bool("METALPRICEAPI_ENABLE_OHLC", default=False),
         metalpriceapi_base_currencies=parse_base_currencies(os.getenv("METALPRICEAPI_BASE_CURRENCIES")),
         supabase_url=_required_env("SUPABASE_URL"),
         supabase_service_role_key=_required_env("SUPABASE_SERVICE_ROLE_KEY"),

@@ -1,6 +1,6 @@
 # XAUlytics
 
-**Demonstration Metal Price ETL** — ingests metal and FX-related quotes from [MetalpriceAPI](https://metalpriceapi.com/), normalizes them in **Python**, and loads idempotent rows into **Supabase** (PostgreSQL). A **static browser dashboard** reads pricing and symbol catalog data from Supabase only (no MetalpriceAPI calls from the browser). The stack includes **Docker** (containerized CLI for Linux-style runs anywhere) and **GitHub Actions** for scheduled jobs. Use it as a reference for extract → transform → load layout, environment-driven configuration, and automation.
+**Precious Metal Price Automated ETL Flow** — ingests metal and FX-related quotes from [MetalpriceAPI](https://metalpriceapi.com/), normalizes them in **Python**, and loads idempotent rows into **Supabase** (PostgreSQL). A **static browser dashboard** reads pricing and symbol catalog data from Supabase only (no MetalpriceAPI calls from the browser). The stack includes **Docker** (containerized CLI for Linux-style runs anywhere) and **GitHub Actions** for scheduled jobs. Use it as a reference for extract → transform → load layout, environment-driven configuration, and automation.
 
 ## What this project demonstrates
 
@@ -58,19 +58,13 @@
    xaulytics-etl symbols
    ```
 
-5. Choose which symbols participate in pricing requests by setting `enabled_for_pricing = true` (this ETL builds the MetalpriceAPI `currencies` parameter from these rows). Include **`…-BID`** / **`…-ASK`** pairs if you want bid/ask on dashboard cards (example shows spot metals plus industrial examples):
+5. Choose which symbols participate in pricing requests by setting `enabled_for_pricing = true` (this ETL builds the MetalpriceAPI `currencies` parameter from these rows). Include **`…-BID`** / **`…-ASK`** pairs if you want bid/ask on dashboard cards (example shows spot precious metal only):
 
    ```sql
    update xaulytics.metalprice_api_symbols_v1
    set enabled_for_pricing = true
-   where symbol_code in (
-     'XAU','XAU-BID','XAU-ASK',
-     'XAG','XAG-BID','XAG-ASK',
-     'XPT','XPT-BID','XPT-ASK',
-     'XPD','XPD-BID','XPD-ASK',
-     'XRH',
-     'ALU','XCU','NI','ZNC'
-   );
+   where category = 'precious_metals'
+   ;
    ```
 
 6. Run loads:
@@ -118,7 +112,7 @@ Read from the environment (see `.env.example`):
 | `METALPRICEAPI_API_KEY` | API key |
 | `METALPRICEAPI_BASE_URL` | Default `https://api.metalpriceapi.com` (include `https://`) |
 | `METALPRICEAPI_BASE_CURRENCIES` | Comma-separated bases (e.g. `USD,CAD,AUD,EUR,GBP`). One MetalpriceAPI spot request per base per run. Default when unset: **`USD`** only. |
-| `METALPRICEAPI_ENABLE_OHLC` | `true` / `false` (or `1` / `0`). When `false`, skips **`GET /v1/ohlc`**; **`open_base` … `close_base`** stay null. Default: **`true`**. |
+| `METALPRICEAPI_ENABLE_OHLC` | `true` / `false` (or `1` / `0`). When `false`, skips **`GET /v1/ohlc`**; **`open_base` … `close_base`** stay null. Default: **`false`**. |
 | `SUPABASE_URL` | Project URL (no `/rest/v1/` suffix) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-side Supabase key (JWT **`service_role`** or newer **`sb_secret_…`** key; CI: GitHub Secret only) |
 | `SUPABASE_SCHEMA` | Default `xaulytics` |
@@ -142,6 +136,44 @@ One row per run: `run_id`, **`mode`** (`daily`, `historical_manual`, `symbols_ca
 Catalog from `GET /v1/symbols`. Important column: **`enabled_for_pricing`** — drives `currencies` for pricing endpoints. Stable view: `metalprice_api_symbols_current`.
 
 Views **`metal_prices_current`**, **`etl_runs_current`**, **`metalprice_api_symbols_current`** mirror versioned tables for stable downstream naming. **`metal_prices_current`** and **`metalprice_api_symbols_current`** use **`security_invoker`** so queries respect the caller’s privileges (typical browser calls use the **`anon`** role).
+
+## Docker
+
+```bash
+docker build -t xaulytics-etl:latest .
+docker run --rm --env-file .env xaulytics-etl:latest daily
+docker run --rm --env-file .env xaulytics-etl:latest historical --start-date 2026-04-01 --end-date 2026-04-05
+docker run --rm --env-file .env xaulytics-etl:latest symbols
+```
+
+## GitHub Actions
+
+| Workflow | Purpose |
+|----------|---------|
+| `daily-etl.yml` | Cron schedule + **workflow_dispatch**: `symbols` then `daily` |
+| `historical-etl.yml` | Manual: inputs `start_date` / `end_date` (`YYYY-MM-DD`), validates ISO dates, then `symbols` + `historical` |
+| `ci.yml` | Manual `pytest` (Python 3.12) |
+
+**Secrets** (GitHub **Settings → Secrets and variables**): `METALPRICEAPI_API_KEY`, `METALPRICEAPI_BASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+
+**Workflow environment** (set in each YAML file, not secrets): `daily-etl.yml` and `historical-etl.yml` define **`METALPRICEAPI_BASE_CURRENCIES`** and **`METALPRICEAPI_ENABLE_OHLC`** (for example five bases and OHLC on or off). Edit the workflow file to change scheduled behavior; values in `.env.example` apply to local runs only.
+
+### Run CI from GitHub
+
+**Actions** → **CI** → **Run workflow**.
+
+### Run historical ETL from GitHub
+
+**Actions** → **Historical ETL (Manual)** → **Run workflow** → set `start_date` and `end_date` (`YYYY-MM-DD`).
+
+## Tests
+
+```bash
+pip install -e ".[dev]"
+pytest -q tests
+```
+
+This matches the **CI** workflow (`pip install -e .[dev]` then `pytest -q tests`). CI runs on **workflow_dispatch** only (not on every push).
 
 ## Dashboard (web)
 
@@ -194,44 +226,6 @@ Optional **`performanceSpotRowLimit`** in **`dashboard/config.js`** caps how man
 - **Permissions:** **`sql/schema.sql`** grants **`anon` / `authenticated`** **`USAGE`** on **`xaulytics`** and **`SELECT`** on **`metal_prices_v1`**, **`metal_prices_current`**, **`metalprice_api_symbols_v1`**, and **`metalprice_api_symbols_current`**. After **`DROP VIEW`** / **`CREATE VIEW`**, re-run that **`GRANT`** block from **`sql/schema.sql`** if you see **`permission denied for view …`**. Missing **`USAGE`** on the schema surfaces as **`permission denied for schema xaulytics`**.
 - **`pricesRelation`** defaults to **`metal_prices_current`**; if that view is stale, recreate it from **`sql/schema.sql`** or point **`pricesRelation`** at **`metal_prices_v1`** temporarily.
 - **Expose schema:** Supabase **Project Settings → Data API**: include **`xaulytics`** in **exposed schemas** so PostgREST serves the **`xaulytics`** tables/views.
-
-## Docker
-
-```bash
-docker build -t xaulytics-etl:latest .
-docker run --rm --env-file .env xaulytics-etl:latest daily
-docker run --rm --env-file .env xaulytics-etl:latest historical --start-date 2026-04-01 --end-date 2026-04-05
-docker run --rm --env-file .env xaulytics-etl:latest symbols
-```
-
-## GitHub Actions
-
-| Workflow | Purpose |
-|----------|---------|
-| `daily-etl.yml` | Cron schedule + **workflow_dispatch**: `symbols` then `daily` |
-| `historical-etl.yml` | Manual: inputs `start_date` / `end_date` (`YYYY-MM-DD`), validates ISO dates, then `symbols` + `historical` |
-| `ci.yml` | Manual `pytest` (Python 3.12) |
-
-**Secrets** (GitHub **Settings → Secrets and variables**): `METALPRICEAPI_API_KEY`, `METALPRICEAPI_BASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
-
-**Workflow environment** (set in each YAML file, not secrets): `daily-etl.yml` and `historical-etl.yml` define **`METALPRICEAPI_BASE_CURRENCIES`** and **`METALPRICEAPI_ENABLE_OHLC`** (for example five bases and OHLC on or off). Edit the workflow file to change scheduled behavior; values in `.env.example` apply to local runs only.
-
-### Run CI from GitHub
-
-**Actions** → **CI** → **Run workflow**.
-
-### Run historical ETL from GitHub
-
-**Actions** → **Historical ETL (Manual)** → **Run workflow** → set `start_date` and `end_date` (`YYYY-MM-DD`).
-
-## Tests
-
-```bash
-pip install -e ".[dev]"
-pytest -q tests
-```
-
-This matches the **CI** workflow (`pip install -e .[dev]` then `pytest -q tests`). CI runs on **workflow_dispatch** only (not on every push).
 
 ## Attribution
 
