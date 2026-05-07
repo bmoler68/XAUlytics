@@ -103,10 +103,12 @@
 
   let selectedMetal = metals[0];
   let trendChart = null;
+  let lastDetailRows = [];
   /** @type {Record<string, string>} */
   let symbolLabels = {};
 
   let currencySelectBound = false;
+  let resizeBound = false;
 
   /** DB/API may return `date` or ISO datetime; string compare must use one shape or anchors break (e.g. 5y → N/A). */
   function normalizePricingDate(value) {
@@ -448,13 +450,12 @@
 
       const card = document.createElement("article");
       card.className = `card ${selectedMetal === metal ? "selected" : ""}`;
-      const displayLine = symbolLabels[metal]
-        ? `<p class="symbol-display-name">${escapeHtml(symbolLabels[metal])}</p>`
-        : "";
+      const cardTitle = symbolLabels[metal]
+        ? `${escapeHtml(symbolLabels[metal])} (${escapeHtml(metal)})`
+        : escapeHtml(metal);
 
       card.innerHTML = `
-        <h3>${metal}</h3>
-        ${displayLine}
+        <h3>${cardTitle}</h3>
         <div class="spot">${fmt(now.spot, 2)} ${currentBaseCurrency}</div>
         <div class="metric-row"><span>Bid</span><span>${fmt(now.bid, 2)}</span></div>
         <div class="metric-row"><span>Ask</span><span>${fmt(now.ask, 2)}</span></div>
@@ -531,6 +532,7 @@
         return { ...r, spread, deltaAmount: delta.amount, deltaPercent: delta.percent };
       });
 
+    lastDetailRows = rows;
     renderTrendChart(rows, metal);
     renderHistoryTable(rows);
   }
@@ -609,19 +611,45 @@
     const recent = [...rows].reverse().slice(0, 30);
     tbody.innerHTML = recent
       .map(
-        (r) => `
+        (r) => {
+          const changeClass =
+            r.deltaAmount == null || Number.isNaN(r.deltaAmount)
+              ? ""
+              : r.deltaAmount >= 0
+                ? "change-positive"
+                : "change-negative";
+          return `
         <tr>
-          <td>${escapeHtml(r.date)}</td>
-          <td>${fmt(r.spot, 2)}</td>
-          <td>${fmt(r.bid, 2)}</td>
-          <td>${fmt(r.ask, 2)}</td>
-          <td>${fmt(r.spread, 4)}</td>
-          <td>${signed(r.deltaAmount, 2)}</td>
-          <td>${pct(r.deltaPercent)}</td>
+          <td data-label="Date">${escapeHtml(r.date)}</td>
+          <td data-label="Spot">${fmt(r.spot, 2)}</td>
+          <td data-label="Bid">${fmt(r.bid, 2)}</td>
+          <td data-label="Ask">${fmt(r.ask, 2)}</td>
+          <td data-label="Spread">${fmt(r.spread, 4)}</td>
+          <td data-label="Daily Change" class="${changeClass}">${signed(r.deltaAmount, 2)}</td>
+          <td data-label="Daily Change %" class="${changeClass}">${pct(r.deltaPercent)}</td>
         </tr>
-      `
+      `;
+        }
       )
       .join("");
+  }
+
+  function setupResponsiveChartRerender() {
+    if (resizeBound) return;
+    resizeBound = true;
+    let lastViewport = window.matchMedia("(max-width: 640px)").matches;
+    let timer = null;
+
+    window.addEventListener("resize", () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        const nowViewport = window.matchMedia("(max-width: 640px)").matches;
+        if (nowViewport !== lastViewport && lastDetailRows.length) {
+          lastViewport = nowViewport;
+          renderTrendChart(lastDetailRows, selectedMetal);
+        }
+      }, 150);
+    });
   }
 
   function showError(err) {
@@ -643,6 +671,7 @@
 
   async function boot() {
     setupBaseCurrencySelect();
+    setupResponsiveChartRerender();
     symbolLabels = await fetchSymbolLabels();
     await loadDashboardData();
   }

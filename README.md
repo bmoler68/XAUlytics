@@ -182,9 +182,18 @@ Static assets under **`dashboard/`** (open via **`dashboard/serve.py`** or any s
 - **Base currency** dropdown (`baseCurrencies` in config); reloads cards and charts from **`metal_prices_*`** for the selected **`base_currency`**
 - Cards for configurable **`preciousMetals`** (default `XAU`, `XAG`, `XPT`, `XPD`, `XRH`). Quote codes are normalized from config (invalid entries are dropped).
 - **`display_name`** from **`metalprice_api_symbols_current`** when the catalog has a row (sync with **`xaulytics-etl symbols`**)
+- Card title uses **`display_name (SYMBOL)`** when available (fallback: symbol only)
 - Latest **spot**, **bid**, **ask**, **spread** for the **same `pricing_date`** on all cards (bid/ask need enabled symbols such as `XAU-BID` / `XAU-ASK`)
 - **Spot change** vs the previous **`pricing_date`** returned for the **first** symbol in **`preciousMetals`** (default **`XAU`**): latest and prior dates are shared across cards for that comparison
 - Click a card for trend chart + recent history table (history table **Δ** compares each date to the chronologically previous date **that has data** for that metal)
+
+### Responsive / adaptive behavior
+
+- Desktop/tablet keep full table and card density; mobile applies denser card sizing and layout tuned for touch.
+- Main metal cards use **2 columns** on smaller phones and **3 columns** on wider phones in the mobile breakpoint.
+- The detail history table switches to **stacked row cards** on mobile (label/value lines), while keeping a standard table on larger screens.
+- Mobile stacked history rows colorize **Daily Change** and **Daily Change %** values with the same positive/negative semantics as desktop.
+- Trend chart options are recomputed when crossing the mobile breakpoint so legend/tick sizing stays readable after resize/orientation changes.
 
 ### Spot performance table
 
