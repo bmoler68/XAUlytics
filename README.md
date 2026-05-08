@@ -150,13 +150,15 @@ docker run --rm --env-file .env xaulytics-etl:latest symbols
 
 | Workflow | Purpose |
 |----------|---------|
-| `daily-etl.yml` | Cron schedule + **workflow_dispatch**: `symbols` then `daily` |
-| `historical-etl.yml` | Manual: inputs `start_date` / `end_date` (`YYYY-MM-DD`), validates ISO dates, then `symbols` + `historical` |
+| `daily-etl.yml` | Cron schedule + **workflow_dispatch**: builds the Docker image, then runs `symbols` and `daily` via `docker run` |
+| `historical-etl.yml` | Manual: inputs `start_date` / `end_date` (`YYYY-MM-DD`), validates ISO dates, builds the Docker image, then runs `symbols` + `historical` via `docker run` |
 | `ci.yml` | Manual `pytest` (Python 3.12) |
 
 **Secrets** (GitHub **Settings → Secrets and variables**): `METALPRICEAPI_API_KEY`, `METALPRICEAPI_BASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 
 **Workflow environment** (set in each YAML file, not secrets): `daily-etl.yml` and `historical-etl.yml` define **`METALPRICEAPI_BASE_CURRENCIES`** and **`METALPRICEAPI_ENABLE_OHLC`** (for example five bases and OHLC on or off). Edit the workflow file to change scheduled behavior; values in `.env.example` apply to local runs only.
+
+`daily-etl.yml` and `historical-etl.yml` pass secrets and configuration into containers at runtime (`docker run --env ...`); secrets are not baked into the image.
 
 ### Run CI from GitHub
 

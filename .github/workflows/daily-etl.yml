@@ -25,18 +25,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install package
+      - name: Build ETL image
         run: |
-          python -m pip install --upgrade pip
-          pip install .
+          docker build -t xaulytics-etl:${{ github.sha }} .
 
       - name: Sync symbol catalog
-        run: xaulytics-etl symbols
+        run: |
+          docker run --rm \
+            --env METALPRICEAPI_API_KEY \
+            --env METALPRICEAPI_BASE_URL \
+            --env METALPRICEAPI_BASE_CURRENCIES \
+            --env METALPRICEAPI_ENABLE_OHLC \
+            --env SUPABASE_URL \
+            --env SUPABASE_SERVICE_ROLE_KEY \
+            --env SUPABASE_SCHEMA \
+            --env SUPABASE_METAL_PRICES_TABLE \
+            --env SUPABASE_ETL_RUNS_TABLE \
+            --env SUPABASE_SYMBOLS_TABLE \
+            --env LOG_LEVEL \
+            xaulytics-etl:${{ github.sha }} symbols
 
       - name: Run daily ETL
-        run: xaulytics-etl daily
+        run: |
+          docker run --rm \
+            --env METALPRICEAPI_API_KEY \
+            --env METALPRICEAPI_BASE_URL \
+            --env METALPRICEAPI_BASE_CURRENCIES \
+            --env METALPRICEAPI_ENABLE_OHLC \
+            --env SUPABASE_URL \
+            --env SUPABASE_SERVICE_ROLE_KEY \
+            --env SUPABASE_SCHEMA \
+            --env SUPABASE_METAL_PRICES_TABLE \
+            --env SUPABASE_ETL_RUNS_TABLE \
+            --env SUPABASE_SYMBOLS_TABLE \
+            --env LOG_LEVEL \
+            xaulytics-etl:${{ github.sha }} daily
