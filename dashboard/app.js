@@ -290,7 +290,7 @@
       : "";
     cap.textContent =
       intro +
-      `Uses spot rows only (quote code ${metal}); missing bid/ask on some days does not affect these returns. Today compares the latest published day to the prior published day. Each other period uses the spot on the exact same calendar day in the prior month, six months earlier, one calendar year earlier, or five calendar years earlier (UTC), compared to the latest day. YTD uses the spot on January 1 of the data year only when that exact date exists. Missing anchor dates show N/A.`;
+      `Today compares the latest published day to the prior published day. Each other period uses the spot on the exact same calendar day in the prior month, six months earlier, one calendar year earlier, or five calendar years earlier (UTC), compared to the latest day. YTD uses the spot on January 1 of the data year only when that exact date exists. N/A shows when history is not present.`;
     tbody.innerHTML = periodRows
       .map((r) => {
         const cls =
