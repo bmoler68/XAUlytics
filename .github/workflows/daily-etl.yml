@@ -60,3 +60,44 @@ jobs:
             --env SUPABASE_SYMBOLS_TABLE \
             --env LOG_LEVEL \
             xaulytics-etl:${{ github.sha }} daily
+
+  retention-prices:
+    needs: run-daily-etl
+    runs-on: ubuntu-latest
+    env:
+      METALPRICEAPI_API_KEY: ${{ secrets.METALPRICEAPI_API_KEY }}
+      METALPRICEAPI_BASE_URL: ${{ secrets.METALPRICEAPI_BASE_URL }}
+      METALPRICEAPI_BASE_CURRENCIES: "USD,CAD,AUD,EUR,GBP"
+      METALPRICEAPI_ENABLE_OHLC: "false"
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_SCHEMA: xaulytics
+      SUPABASE_METAL_PRICES_TABLE: metal_prices_v1
+      SUPABASE_ETL_RUNS_TABLE: etl_runs_v1
+      SUPABASE_SYMBOLS_TABLE: metalprice_api_symbols_v1
+      LOG_LEVEL: INFO
+      RETENTION_ANCHOR_YEARS: "5"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build ETL image
+        run: |
+          docker build -t xaulytics-etl:${{ github.sha }} .
+
+      - name: Retention (price rows older than anchor window)
+        run: |
+          docker run --rm \
+            --env METALPRICEAPI_API_KEY \
+            --env METALPRICEAPI_BASE_URL \
+            --env METALPRICEAPI_BASE_CURRENCIES \
+            --env METALPRICEAPI_ENABLE_OHLC \
+            --env SUPABASE_URL \
+            --env SUPABASE_SERVICE_ROLE_KEY \
+            --env SUPABASE_SCHEMA \
+            --env SUPABASE_METAL_PRICES_TABLE \
+            --env SUPABASE_ETL_RUNS_TABLE \
+            --env SUPABASE_SYMBOLS_TABLE \
+            --env LOG_LEVEL \
+            --env RETENTION_ANCHOR_YEARS \
+            xaulytics-etl:${{ github.sha }} retention

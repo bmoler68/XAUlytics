@@ -113,7 +113,7 @@ from xaulytics.metalprice_api_symbols_v1;
 
 grant usage on schema xaulytics to service_role;
 
-grant select, insert, update on table xaulytics.metal_prices_v1 to service_role;
+grant select, insert, update, delete on table xaulytics.metal_prices_v1 to service_role;
 grant select, insert, update on table xaulytics.etl_runs_v1 to service_role;
 grant select, insert, update on table xaulytics.metalprice_api_symbols_v1 to service_role;
 

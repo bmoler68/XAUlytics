@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -60,6 +60,46 @@ class SupabaseLoader:
             on_conflict="pricing_date,quote_code,base_currency",
         ).execute()
         return len(payload)
+
+    def fetch_global_max_pricing_date(self) -> date | None:
+        """Latest pricing_date across all rows (spot/bid/ask, all bases)."""
+        response = (
+            self._client.schema(self._schema)
+            .table(self._metal_prices_table)
+            .select("pricing_date")
+            .order("pricing_date", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = response.data or []
+        if not rows:
+            return None
+        raw = rows[0].get("pricing_date")
+        if raw is None:
+            return None
+        if isinstance(raw, date):
+            return raw
+        s = str(raw)
+        return date.fromisoformat(s[:10])
+
+    def count_prices_strictly_before(self, cutoff: date) -> int:
+        response = (
+            self._client.schema(self._schema)
+            .table(self._metal_prices_table)
+            .select("pricing_date", count="exact", head=True)
+            .lt("pricing_date", cutoff.isoformat())
+            .execute()
+        )
+        return int(response.count or 0)
+
+    def delete_prices_strictly_before(self, cutoff: date) -> None:
+        (
+            self._client.schema(self._schema)
+            .table(self._metal_prices_table)
+            .delete()
+            .lt("pricing_date", cutoff.isoformat())
+            .execute()
+        )
 
     def upsert_symbol_catalog(self, records: list[SymbolCatalogRecord], batch_size: int = 200) -> int:
         if not records:

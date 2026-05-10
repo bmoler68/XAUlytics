@@ -31,6 +31,7 @@
 | `src/xaulytics_etl/symbol_catalog.py` | Symbol metadata heuristics from `/v1/symbols` |
 | `src/xaulytics_etl/logging_utils.py` | JSON log formatter |
 | `src/xaulytics_etl/etl.py` | Orchestration: `daily`, `historical`, `symbols` |
+| `src/xaulytics_etl/retention.py` | Price retention: delete rows older than the dashboard anchor window (`xaulytics-etl retention`) |
 | `src/xaulytics_etl/cli.py` | `xaulytics-etl` CLI entrypoint |
 | `sql/schema.sql` | Schema **`xaulytics`**, tables, indexes, views (**`security_invoker`** on price/symbol current views), **`service_role`** grants, **`anon` / `authenticated`** read grants for dashboard |
 | `dashboard/` | Static UI: `index.html`, `app.js`, `styles.css` (Chart.js + Supabase JS from CDN); copy **`config.example.js`** → **`config.js`** (gitignored) |
@@ -84,6 +85,7 @@ If no symbols have `enabled_for_pricing = true`, **daily** and **historical** co
 | `xaulytics-etl symbols` | `GET /v1/symbols` → upsert reference catalog (`metalprice_api_symbols_v1`). |
 | `xaulytics-etl daily` | For each configured **`METALPRICEAPI_BASE_CURRENCIES`**, `GET /v1/yesterday` with that `base` and DB-driven `currencies`; optionally **`GET /v1/ohlc`** per row when **`METALPRICEAPI_ENABLE_OHLC=true`**. Prior UTC calendar day — schedule after MetalpriceAPI publishes prior-day history (**00:05 GMT** per their docs). |
 | `xaulytics-etl historical` | Same bases and optional OHLC as daily; spot via single-date or `timeframe`. Same `currencies` list for every base. |
+| `xaulytics-etl retention` | Deletes **`metal_prices_v1`** rows with **`pricing_date`** strictly before **`global MAX(pricing_date)` minus `RETENTION_ANCHOR_YEARS` calendar years** (default **5**, matching the dashboard **5y** anchor). Use **`--dry-run`** to log counts only. Requires **`service_role`** **`DELETE`** on **`metal_prices_v1`** (see **`sql/schema.sql`**). |
 
 Spot **`price_base`** and unit hints follow `transform.py` and `symbol_catalog.py`. OHLC pair orientation (`base` / `currency`) follows `ohlc_params.py`.
 
@@ -120,12 +122,13 @@ Read from the environment (see `.env.example`):
 | `SUPABASE_ETL_RUNS_TABLE` | Default `etl_runs_v1` |
 | `SUPABASE_SYMBOLS_TABLE` | Default `metalprice_api_symbols_v1` |
 | `LOG_LEVEL` | Default `INFO` |
+| `RETENTION_ANCHOR_YEARS` | Calendar years before global max **`pricing_date`** to retain **`metal_prices_v1`** history from (`xaulytics-etl retention`). Default **5** when unset. Rows strictly older than the cutoff date are deleted. |
 
 ## Data model (schema `xaulytics`)
 
 ### `metal_prices_v1`
 
-Normalized rates: composite primary key **`(pricing_date, quote_code, base_currency)`** so the same symbol can exist for USD, CAD, etc. **`price_base`** holds **`1 / quote_per_base`** from the spot endpoints — interpret as **price in `base_currency` units** per unit of quote. **`open_base`**, **`high_base`**, **`low_base`**, **`close_base`** are OHLC from **`GET /v1/ohlc`** in the same **spot base** as the row (e.g. CAD when `base_currency` is CAD), when **`METALPRICEAPI_ENABLE_OHLC`** is true and the request succeeds (one OHLC call per output row). Also includes optional `unit`, `source_endpoint`, `source_timestamp`, `ingested_at_utc`.
+Normalized rates: composite primary key **`(pricing_date, quote_code, base_currency)`** so the same symbol can exist for USD, CAD, etc. **`DELETE`** is granted to **`service_role`** so **`xaulytics-etl retention`** can prune old rows while preserving calendar anchors used by the dashboard (including **5y**). **`price_base`** holds **`1 / quote_per_base`** from the spot endpoints — interpret as **price in `base_currency` units** per unit of quote. **`open_base`**, **`high_base`**, **`low_base`**, **`close_base`** are OHLC from **`GET /v1/ohlc`** in the same **spot base** as the row (e.g. CAD when `base_currency` is CAD), when **`METALPRICEAPI_ENABLE_OHLC`** is true and the request succeeds (one OHLC call per output row). Also includes optional `unit`, `source_endpoint`, `source_timestamp`, `ingested_at_utc`.
 
 ### `etl_runs_v1`
 
@@ -144,13 +147,15 @@ docker build -t xaulytics-etl:latest .
 docker run --rm --env-file .env xaulytics-etl:latest daily
 docker run --rm --env-file .env xaulytics-etl:latest historical --start-date 2026-04-01 --end-date 2026-04-05
 docker run --rm --env-file .env xaulytics-etl:latest symbols
+docker run --rm --env-file .env xaulytics-etl:latest retention
+docker run --rm --env-file .env xaulytics-etl:latest retention --dry-run
 ```
 
 ## GitHub Actions
 
 | Workflow | Purpose |
 |----------|---------|
-| `daily-etl.yml` | Cron schedule + **workflow_dispatch**: builds the Docker image, then runs `symbols` and `daily` via `docker run` |
+| `daily-etl.yml` | Cron schedule + **workflow_dispatch**: builds the Docker image, runs `symbols` and `daily` via `docker run`, then runs a **`retention-prices`** job (**`needs`** the daily job) that builds again and runs **`xaulytics-etl retention`** |
 | `historical-etl.yml` | Manual: inputs `start_date` / `end_date` (`YYYY-MM-DD`), validates ISO dates, builds the Docker image, then runs `symbols` + `historical` via `docker run` |
 | `ci.yml` | Manual `pytest` (Python 3.12) |
 
