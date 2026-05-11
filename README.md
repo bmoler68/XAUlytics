@@ -158,8 +158,9 @@ docker run --rm --env-file .env xaulytics-etl:latest retention --dry-run
 | `daily-etl.yml` | Cron schedule + **workflow_dispatch**: builds the Docker image, runs `symbols` and `daily` via `docker run`, then runs a **`retention-prices`** job (**`needs`** the daily job) that builds again and runs **`xaulytics-etl retention`** |
 | `historical-etl.yml` | Manual: inputs `start_date` / `end_date` (`YYYY-MM-DD`), validates ISO dates, builds the Docker image, then runs `symbols` + `historical` via `docker run` |
 | `ci.yml` | Manual `pytest` (Python 3.12) |
+| `deploy-dashboard-pages.yml` | Push to `main` (dashboard paths) or manual dispatch: generates `dashboard/config.js` from `dashboard/config.example.js` via Python, uploads `dashboard/` as the Pages artifact root, deploys GitHub Pages |
 
-**Secrets** (GitHub **Settings → Secrets and variables**): `METALPRICEAPI_API_KEY`, `METALPRICEAPI_BASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+**Secrets** (GitHub **Settings → Secrets and variables**): `METALPRICEAPI_API_KEY`, `METALPRICEAPI_BASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DASHBOARD_SUPABASE_URL`, `DASHBOARD_SUPABASE_ANON_KEY`.
 
 **Workflow environment** (set in each YAML file, not secrets): `daily-etl.yml` and `historical-etl.yml` define **`METALPRICEAPI_BASE_CURRENCIES`** and **`METALPRICEAPI_ENABLE_OHLC`** (for example five bases and OHLC on or off). Edit the workflow file to change scheduled behavior; values in `.env.example` apply to local runs only.
 
@@ -235,6 +236,16 @@ Optional **`performanceSpotRowLimit`** in **`dashboard/config.js`** caps how man
    ```
 
    Options: **`--port`** / **`-p`**, **`--bind`** / **`-b`** (e.g. `0.0.0.0`). Opening **`index.html`** via **`file://`** may work but serving avoids common browser restrictions.
+
+### Dashboard deployment (GitHub Pages)
+
+1. In GitHub repository settings, set **Pages → Source** to **GitHub Actions**.
+2. Set repository secrets:
+   - **`DASHBOARD_SUPABASE_URL`**
+   - **`DASHBOARD_SUPABASE_ANON_KEY`** (publishable / anon key only)
+3. The workflow **`deploy-dashboard-pages.yml`** generates **`dashboard/config.js`** from **`dashboard/config.example.js`** using a Python step, replacing `supabaseUrl` and `supabaseAnonKey` from those secrets.
+4. The workflow uploads **`dashboard/`** as the Pages artifact root, so the project site URL resolves to:
+   - **`https://bmoler68.github.io/XAUlytics`**
 
 ### Data expectations
 

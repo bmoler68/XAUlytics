@@ -1,0 +1,87 @@
+name: Deploy Dashboard to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/deploy-dashboard-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  deploy-dashboard:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Generate dashboard config.js from template
+        env:
+          DASHBOARD_SUPABASE_URL: ${{ secrets.DASHBOARD_SUPABASE_URL }}
+          DASHBOARD_SUPABASE_ANON_KEY: ${{ secrets.DASHBOARD_SUPABASE_ANON_KEY }}
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import re
+          import os
+          import sys
+
+          supabase_url = (os.getenv("DASHBOARD_SUPABASE_URL") or "").strip()
+          supabase_anon_key = (os.getenv("DASHBOARD_SUPABASE_ANON_KEY") or "").strip()
+          if not supabase_url or not supabase_anon_key:
+            raise SystemExit("Missing DASHBOARD_SUPABASE_URL or DASHBOARD_SUPABASE_ANON_KEY")
+
+          template_path = pathlib.Path("dashboard/config.example.js")
+          output_path = pathlib.Path("dashboard/config.js")
+          template = template_path.read_text(encoding="utf-8")
+
+          result = re.sub(
+              r'supabaseUrl:\s*"[^"]*"',
+              f'supabaseUrl: "{supabase_url}"',
+              template,
+              count=1,
+          )
+          result = re.sub(
+              r'supabaseAnonKey:\s*"[^"]*"',
+              f'supabaseAnonKey: "{supabase_anon_key}"',
+              result,
+              count=1,
+          )
+
+          if result == template:
+            raise SystemExit("Template replacement failed. Check dashboard/config.example.js format.")
+
+          output_path.write_text(result, encoding="utf-8")
+
+          # Quick sanity check: ensure generated file no longer contains placeholders.
+          generated = output_path.read_text(encoding="utf-8")
+          if "your-project.supabase.co" in generated or "replace_with_public_anon_key" in generated:
+            raise SystemExit("config.js still contains placeholder values.")
+
+          print("Generated dashboard/config.js from template.")
+          PY
+
+      - name: Upload Pages artifact (dashboard root)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dashboard
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
