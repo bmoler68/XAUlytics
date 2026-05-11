@@ -103,6 +103,9 @@
 
   let selectedMetal = metals[0];
   let trendChart = null;
+  let ratioChart = null;
+  /** @type {{ labels: string[], data: (number|null)[] }} */
+  let lastRatioSeries = { labels: [], data: [] };
   let lastDetailRows = [];
   /** @type {Record<string, string>} */
   let symbolLabels = {};
@@ -203,6 +206,49 @@
     const rows = data || [];
     rows.reverse();
     return dedupeSpotRowsByDateAscending(rows);
+  }
+
+  async function fetchXauXagSpotRowsAscending() {
+    const lim = Math.min(historyDays * 4, 10000);
+    const { data, error } = await supabase
+      .from(pricesRelation)
+      .select("pricing_date,quote_code,price_base")
+      .eq("base_currency", currentBaseCurrency)
+      .in("quote_code", ["XAU", "XAG"])
+      .order("pricing_date", { ascending: false })
+      .limit(lim);
+    if (error) throw error;
+    const rows = [...(data || [])];
+    rows.reverse();
+    return rows;
+  }
+
+  function spotMapFromMixedAscending(rowsAsc, quoteCode) {
+    const m = new Map();
+    for (const r of rowsAsc) {
+      if (r.quote_code !== quoteCode) continue;
+      const d = normalizePricingDate(r.pricing_date);
+      if (!d) continue;
+      m.set(d, Number(r.price_base));
+    }
+    return m;
+  }
+
+  function buildGoldSilverRatioSeries(rowsAsc) {
+    const xau = spotMapFromMixedAscending(rowsAsc, "XAU");
+    const xag = spotMapFromMixedAscending(rowsAsc, "XAG");
+    const dates = [...xau.keys()].filter((d) => xag.has(d)).sort();
+    const sliceDates = dates.slice(-historyDays);
+    const labels = sliceDates;
+    const data = sliceDates.map((d) => {
+      const denom = xag.get(d);
+      const num = xau.get(d);
+      if (denom == null || num == null || Number.isNaN(denom) || Number.isNaN(num) || denom === 0) {
+        return null;
+      }
+      return num / denom;
+    });
+    return { labels, data };
   }
 
   /**
@@ -535,6 +581,99 @@
     lastDetailRows = rows;
     renderTrendChart(rows, metal);
     renderHistoryTable(rows);
+
+    const ratioSection = document.getElementById("ratio-chart-section");
+    const ratioEmpty = document.getElementById("ratio-chart-empty");
+    if (ratioSection && ratioEmpty) {
+      if (metal === "XAU" || metal === "XAG") {
+        ratioSection.hidden = false;
+        try {
+          const mixedRows = await fetchXauXagSpotRowsAscending();
+          const { labels, data } = buildGoldSilverRatioSeries(mixedRows);
+          lastRatioSeries = { labels, data };
+          if (!labels.length) {
+            ratioEmpty.hidden = false;
+            if (ratioChart) {
+              ratioChart.destroy();
+              ratioChart = null;
+            }
+          } else {
+            ratioEmpty.hidden = true;
+            renderRatioChart(labels, data);
+          }
+        } catch (e) {
+          console.warn("Gold/silver ratio chart:", e);
+          lastRatioSeries = { labels: [], data: [] };
+          ratioEmpty.hidden = false;
+          if (ratioChart) {
+            ratioChart.destroy();
+            ratioChart = null;
+          }
+        }
+      } else {
+        ratioSection.hidden = true;
+        ratioEmpty.hidden = true;
+        lastRatioSeries = { labels: [], data: [] };
+        if (ratioChart) {
+          ratioChart.destroy();
+          ratioChart = null;
+        }
+      }
+    }
+  }
+
+  function renderRatioChart(labels, data) {
+    const ctx = document.getElementById("ratio-chart");
+    if (!ctx) return;
+    if (ratioChart) ratioChart.destroy();
+    const narrow = window.matchMedia("(max-width: 640px)").matches;
+    const tickSize = narrow ? 9 : 11;
+    ratioChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: `XAU / XAG (${currentBaseCurrency})`,
+            data,
+            borderColor: "#a78bfa",
+            backgroundColor: "rgba(167, 139, 250, 0.12)",
+            tension: 0.2,
+            spanGaps: false,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            labels: {
+              boxWidth: narrow ? 12 : 40,
+              padding: narrow ? 8 : 12,
+              font: { size: narrow ? 10 : 12 },
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: {
+              maxRotation: narrow ? 50 : 0,
+              minRotation: narrow ? 40 : 0,
+              autoSkip: true,
+              maxTicksLimit: narrow ? 8 : 12,
+              font: { size: tickSize },
+            },
+          },
+          y: {
+            type: "linear",
+            position: "left",
+            ticks: { font: { size: tickSize } },
+          },
+        },
+      },
+    });
   }
 
   function renderTrendChart(rows, metal) {
@@ -647,6 +786,12 @@
         if (nowViewport !== lastViewport && lastDetailRows.length) {
           lastViewport = nowViewport;
           renderTrendChart(lastDetailRows, selectedMetal);
+          if (
+            (selectedMetal === "XAU" || selectedMetal === "XAG") &&
+            lastRatioSeries.labels.length
+          ) {
+            renderRatioChart(lastRatioSeries.labels, lastRatioSeries.data);
+          }
         }
       }, 150);
     });

@@ -34,6 +34,14 @@
         <div class="chart-wrap">
           <canvas id="trend-chart" aria-label="Price trend chart"></canvas>
         </div>
+        <div id="ratio-chart-section" class="ratio-chart-section" hidden>
+          <h3 class="ratio-chart-title">Gold / silver ratio</h3>
+          <p class="muted ratio-chart-caption">XAU spot ÷ XAG spot (troy oz, same base currency).</p>
+          <p id="ratio-chart-empty" class="muted ratio-chart-empty" hidden>No overlapping XAU/XAG spot history for this range.</p>
+          <div class="chart-wrap ratio-chart-wrap">
+            <canvas id="ratio-chart" aria-label="Gold to silver ratio chart"></canvas>
+          </div>
+        </div>
         <div class="performance-wrap">
           <h3 id="performance-heading" class="performance-title">Performance</h3>
           <p id="performance-caption" class="muted performance-caption"></p>
