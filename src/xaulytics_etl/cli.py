@@ -49,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
         "retention",
         help=(
             "Remove metal_prices rows strictly before (global max pricing_date minus RETENTION_ANCHOR_YEARS "
-            "calendar years). Default anchor years is 5 to preserve dashboard 5y performance anchors."
+            "calendar years). Default anchor years is 10 to preserve dashboard 10y performance anchors."
         ),
     )
     retention_parser.add_argument(

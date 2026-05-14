@@ -113,7 +113,7 @@
   let currencySelectBound = false;
   let resizeBound = false;
 
-  /** DB/API may return `date` or ISO datetime; string compare must use one shape or anchors break (e.g. 5y → N/A). */
+  /** DB/API may return `date` or ISO datetime; string compare must use one shape or anchors break (e.g. 10y → N/A). */
   function normalizePricingDate(value) {
     if (value == null || value === "") return "";
     if (value instanceof Date && !Number.isNaN(value.getTime())) {
@@ -144,6 +144,7 @@
       isoSubtractMonths(latestDate, 6),
       isoSubtractYears(latestDate, 1),
       isoSubtractYears(latestDate, 5),
+      isoSubtractYears(latestDate, 10),
       `${y}-01-01`,
     ];
   }
@@ -252,7 +253,7 @@
   }
 
   /**
-   * Load spots for exact calendar dates (e.g. 5y anchor). The rolling series fetch is capped
+   * Load spots for exact calendar dates (e.g. 5y / 10y anchors). The rolling series fetch is capped
    * by PostgREST row limits (~1000 default), so dates years ago are often missing from seriesAsc alone.
    */
   async function fetchSpotPricesForDates(metal, isoDates) {
@@ -281,6 +282,7 @@
       { label: "6 months", amount: null, pct: null },
       { label: "1 year", amount: null, pct: null },
       { label: "5 years", amount: null, pct: null },
+      { label: "10 years", amount: null, pct: null },
     ];
     if (!seriesAsc.length) return empty;
 
@@ -296,6 +298,7 @@
     const t6m = isoSubtractMonths(latestDate, 6);
     const t1y = isoSubtractYears(latestDate, 1);
     const t5y = isoSubtractYears(latestDate, 5);
+    const t10y = isoSubtractYears(latestDate, 10);
 
     const spotByDate = spotMapFromSeries(seriesAsc);
     if (anchorSpots && anchorSpots.size) {
@@ -307,6 +310,7 @@
     const p6m = getSpotExact(spotByDate, t6m);
     const p1y = getSpotExact(spotByDate, t1y);
     const p5y = getSpotExact(spotByDate, t5y);
+    const p10y = getSpotExact(spotByDate, t10y);
 
     const dataYear = Number(latestDate.slice(0, 4));
     const ytdStartIso = `${dataYear}-01-01`;
@@ -319,6 +323,7 @@
       { label: "6 months", amount: returnAmount(p6m, latestPx), pct: pctReturn(p6m, latestPx) },
       { label: "1 year", amount: returnAmount(p1y, latestPx), pct: pctReturn(p1y, latestPx) },
       { label: "5 years", amount: returnAmount(p5y, latestPx), pct: pctReturn(p5y, latestPx) },
+      { label: "10 years", amount: returnAmount(p10y, latestPx), pct: pctReturn(p10y, latestPx) },
     ];
   }
 
@@ -336,7 +341,7 @@
       : "";
     cap.textContent =
       intro +
-      `Today compares the latest published day to the prior published day. Each other period uses the spot on the exact same calendar day in the prior month, six months earlier, one calendar year earlier, or five calendar years earlier (UTC), compared to the latest day. YTD uses the spot on January 1 of the data year only when that exact date exists. N/A shows when history is not present.`;
+      `Today compares the latest published day to the prior published day. Each other period uses the spot on the exact same calendar day in the prior month, six months earlier, one, five, or ten calendar years earlier (UTC), compared to the latest day. YTD uses the spot on January 1 of the data year only when that exact date exists. N/A shows when history is not present.`;
     tbody.innerHTML = periodRows
       .map((r) => {
         const cls =

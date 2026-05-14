@@ -85,7 +85,7 @@ If no symbols have `enabled_for_pricing = true`, **daily** and **historical** co
 | `xaulytics-etl symbols` | `GET /v1/symbols` → upsert reference catalog (`metalprice_api_symbols_v1`). |
 | `xaulytics-etl daily` | For each configured **`METALPRICEAPI_BASE_CURRENCIES`**, `GET /v1/yesterday` with that `base` and DB-driven `currencies`; optionally **`GET /v1/ohlc`** per row when **`METALPRICEAPI_ENABLE_OHLC=true`**. Prior UTC calendar day — schedule after MetalpriceAPI publishes prior-day history (**00:05 GMT** per their docs). |
 | `xaulytics-etl historical` | Same bases and optional OHLC as daily; spot via single-date or `timeframe`. Same `currencies` list for every base. |
-| `xaulytics-etl retention` | Deletes **`metal_prices_v1`** rows with **`pricing_date`** strictly before **`global MAX(pricing_date)` minus `RETENTION_ANCHOR_YEARS` calendar years** (default **5**, matching the dashboard **5y** anchor). Use **`--dry-run`** to log counts only. Requires **`service_role`** **`DELETE`** on **`metal_prices_v1`** (see **`sql/schema.sql`**). |
+| `xaulytics-etl retention` | Deletes **`metal_prices_v1`** rows with **`pricing_date`** strictly before **`global MAX(pricing_date)` minus `RETENTION_ANCHOR_YEARS` calendar years** (default **10**, matching the dashboard **10y** anchor). Use **`--dry-run`** to log counts only. Requires **`service_role`** **`DELETE`** on **`metal_prices_v1`** (see **`sql/schema.sql`**). |
 
 Spot **`price_base`** and unit hints follow `transform.py` and `symbol_catalog.py`. OHLC pair orientation (`base` / `currency`) follows `ohlc_params.py`.
 
@@ -122,13 +122,13 @@ Read from the environment (see `.env.example`):
 | `SUPABASE_ETL_RUNS_TABLE` | Default `etl_runs_v1` |
 | `SUPABASE_SYMBOLS_TABLE` | Default `metalprice_api_symbols_v1` |
 | `LOG_LEVEL` | Default `INFO` |
-| `RETENTION_ANCHOR_YEARS` | Calendar years before global max **`pricing_date`** to retain **`metal_prices_v1`** history from (`xaulytics-etl retention`). Default **5** when unset. Rows strictly older than the cutoff date are deleted. |
+| `RETENTION_ANCHOR_YEARS` | Calendar years before global max **`pricing_date`** to retain **`metal_prices_v1`** history from (`xaulytics-etl retention`). Default **10** when unset. Rows strictly older than the cutoff date are deleted. |
 
 ## Data model (schema `xaulytics`)
 
 ### `metal_prices_v1`
 
-Normalized rates: composite primary key **`(pricing_date, quote_code, base_currency)`** so the same symbol can exist for USD, CAD, etc. **`DELETE`** is granted to **`service_role`** so **`xaulytics-etl retention`** can prune old rows while preserving calendar anchors used by the dashboard (including **5y**). **`price_base`** holds **`1 / quote_per_base`** from the spot endpoints — interpret as **price in `base_currency` units** per unit of quote. **`open_base`**, **`high_base`**, **`low_base`**, **`close_base`** are OHLC from **`GET /v1/ohlc`** in the same **spot base** as the row (e.g. CAD when `base_currency` is CAD), when **`METALPRICEAPI_ENABLE_OHLC`** is true and the request succeeds (one OHLC call per output row). Also includes optional `unit`, `source_endpoint`, `source_timestamp`, `ingested_at_utc`.
+Normalized rates: composite primary key **`(pricing_date, quote_code, base_currency)`** so the same symbol can exist for USD, CAD, etc. **`DELETE`** is granted to **`service_role`** so **`xaulytics-etl retention`** can prune old rows while preserving calendar anchors used by the dashboard (including **10y**). **`price_base`** holds **`1 / quote_per_base`** from the spot endpoints — interpret as **price in `base_currency` units** per unit of quote. **`open_base`**, **`high_base`**, **`low_base`**, **`close_base`** are OHLC from **`GET /v1/ohlc`** in the same **spot base** as the row (e.g. CAD when `base_currency` is CAD), when **`METALPRICEAPI_ENABLE_OHLC`** is true and the request succeeds (one OHLC call per output row). Also includes optional `unit`, `source_endpoint`, `source_timestamp`, `ingested_at_utc`.
 
 ### `etl_runs_v1`
 
@@ -212,9 +212,9 @@ Shown for the selected metal. Uses **spot** rows only (same **`quote_code`** as 
 | **Today** | Latest spot in the loaded series vs the prior calendar row in that series (last vs second-to-last **`pricing_date`** for spot). |
 | **YTD** | Spot on **January 1** of the **same calendar year as the latest spot date**, vs latest — **exact date match only** (no nearest-day fallback). |
 | **1 month / 6 months** | Spot on the **same calendar day** one month or six months earlier (UTC `Date` math), vs latest — exact **`pricing_date`** match only. |
-| **1 year / 5 years** | Spot on the **same calendar day** one or five **calendar years** earlier (UTC), vs latest — exact match only. |
+| **1 year / 5 years / 10 years** | Spot on the **same calendar day** one, five, or ten **calendar years** earlier (UTC), vs latest — exact match only. |
 
-If the anchor calendar day has no spot row for that metal and base, the cell shows **N/A**. Because PostgREST responses are often capped (commonly **~1000 rows** per request unless raised in Supabase), the dashboard loads **rolling recent spot rows** for the “Today” chain **and** runs a **second query** that fetches those **exact anchor dates** by `pricing_date`, so long horizons (e.g. five years back) still resolve when the data exists in the database.
+If the anchor calendar day has no spot row for that metal and base, the cell shows **N/A**. Because PostgREST responses are often capped (commonly **~1000 rows** per request unless raised in Supabase), the dashboard loads **rolling recent spot rows** for the “Today” chain **and** runs a **second query** that fetches those **exact anchor dates** by `pricing_date`, so long horizons (e.g. ten years back) still resolve when the data exists in the database.
 
 Optional **`performanceSpotRowLimit`** in **`dashboard/config.js`** caps how many recent spot rows are requested for the rolling series (default **5000** in **`config.example.js`**); it does **not** replace the anchor-date query above.
 

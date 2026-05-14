@@ -76,7 +76,7 @@ jobs:
       SUPABASE_ETL_RUNS_TABLE: etl_runs_v1
       SUPABASE_SYMBOLS_TABLE: metalprice_api_symbols_v1
       LOG_LEVEL: INFO
-      RETENTION_ANCHOR_YEARS: "5"
+      RETENTION_ANCHOR_YEARS: "10"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

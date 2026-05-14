@@ -25,7 +25,7 @@ def subtract_calendar_years(d: date, years: int) -> date:
 
 
 def _retention_anchor_years() -> int:
-    raw = os.getenv("RETENTION_ANCHOR_YEARS", "5").strip()
+    raw = os.getenv("RETENTION_ANCHOR_YEARS", "10").strip()
     try:
         years = int(raw)
     except ValueError as exc:
@@ -47,7 +47,7 @@ def run_retention(*, dry_run: bool = False) -> RetentionResult:
     """
     Delete rows in metal_prices strictly before (global_max_pricing_date - N calendar years).
 
-    N defaults to 5 (dashboard 5y anchor). Keeps the cutoff date and newer rows.
+    N defaults to 10 (dashboard 10y spot performance anchor). Keeps the cutoff date and newer rows.
     """
     settings = load_settings()
     configure_logging(settings.log_level)
