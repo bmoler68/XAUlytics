@@ -1,0 +1,36 @@
+name: Workflow Keepalive
+
+on:
+  schedule:
+    # Weekly — preemptively re-enable scheduled workflows so GitHub does not
+    # auto-disable them after ~60 days of repository inactivity (no dummy commits).
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  re-enable-scheduled-workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Re-enable workflows with schedule triggers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for workflow in .github/workflows/*; do
+            [ -f "$workflow" ] || continue
+            case "$workflow" in
+              *.yml|*.yaml) ;;
+              *) continue ;;
+            esac
+            name="$(basename "$workflow")"
+            if grep -q 'schedule:' "$workflow"; then
+              echo "Enabling scheduled workflow: ${name}"
+              gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/${name}/enable"
+            fi
+          done
