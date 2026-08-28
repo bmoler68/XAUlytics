@@ -1,5 +1,14 @@
 # XAUlytics
 
+[![CI](https://github.com/bmoler68/XAUlytics/actions/workflows/ci.yml/badge.svg)](https://github.com/bmoler68/XAUlytics/actions/workflows/ci.yml)
+[![Daily ETL](https://github.com/bmoler68/XAUlytics/actions/workflows/daily-etl.yml/badge.svg)](https://github.com/bmoler68/XAUlytics/actions/workflows/daily-etl.yml)
+[![Deploy Dashboard](https://github.com/bmoler68/XAUlytics/actions/workflows/deploy-dashboard-pages.yml/badge.svg)](https://github.com/bmoler68/XAUlytics/actions/workflows/deploy-dashboard-pages.yml)
+[![Python](https://img.shields.io/badge/python-3.12+-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/docker-supported-2496ED?logo=docker&logoColor=white)](Dockerfile)
+[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E?logo=supabase&logoColor=white)](https://supabase.com/)
+[![Dashboard](https://img.shields.io/badge/Dashboard-GitHub%20Pages-222222?logo=githubpages&logoColor=white)](https://bmoler68.github.io/XAUlytics)
+
 **Precious Metal Price Automated ETL Flow** — ingests metal and FX-related quotes from [MetalpriceAPI](https://metalpriceapi.com/), normalizes them in **Python**, and loads idempotent rows into **Supabase** (PostgreSQL). A **static browser dashboard** reads pricing and symbol catalog data from Supabase only (no MetalpriceAPI calls from the browser). The stack includes **Docker** (containerized CLI for Linux-style runs anywhere) and **GitHub Actions** for scheduled jobs. Use it as a reference for extract → transform → load layout, environment-driven configuration, and automation.
 
 ## What this project demonstrates
